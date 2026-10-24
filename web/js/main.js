@@ -1,5 +1,5 @@
 (() => {
-  const { cabins, reviews, whatsapp } = window.SITE;
+  const { cabins, reviews, whatsapp, firebaseProjectId } = window.SITE;
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   const arrow = '<svg viewBox="0 0 24 24"><path d="M5 12h13m-5-6 6 6-6 6"/></svg>';
@@ -134,6 +134,31 @@
   const fmtLong = d => d.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const nights = () => Math.round((checkOut - checkIn) / 864e5);
 
+  /* ---------- Disponibilidad (la publica la app de gestión) ---------- */
+  // cabaña → rangos [llegada, salida) en 'aaaa-mm-dd'; la noche de salida queda libre.
+  let busy = null;
+  const key = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const nightTaken = (id, k) => (busy[id] || []).some(([a, b]) => a <= k && k < b);
+  const freeOn = d => busy ? cabins.filter(c => !nightTaken(c.id, key(d))) : cabins;
+  const freeBetween = (a, b) => {
+    if (!busy) return cabins;
+    const ka = key(a), kb = key(b);
+    return cabins.filter(c => !(busy[c.id] || []).some(([x, y]) => x < kb && y > ka));
+  };
+
+  const loadAvailability = async () => {
+    if (!firebaseProjectId) return;
+    try {
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseProjectId}/databases/(default)/documents/public/availability`;
+      const doc = await (await fetch(url)).json();
+      busy = JSON.parse(doc.fields.json.stringValue).cabins;
+      calEl.classList.add('has-availability');
+      renderCal();
+    } catch (err) {
+      busy = null; // sin datos el calendario sigue funcionando como consulta
+    }
+  };
+
   const renderMonth = base => {
     const y = base.getFullYear(), m = base.getMonth();
     const offset = (new Date(y, m, 1).getDay() + 6) % 7; // semana empieza en lunes
@@ -141,15 +166,23 @@
     let html = `<div class="cal-month"><h4>${MONTHS[m]} ${y}</h4><div class="cal-grid">`;
     html += DOW.map(d => `<span class="cal-dow">${d}</span>`).join('');
     html += '<span></span>'.repeat(offset);
+    const pickingOut = checkIn && !checkOut;
     for (let d = 1; d <= days; d++) {
       const date = new Date(y, m, d);
       const t = date.getTime();
       const cls = ['cal-day'];
+      const free = freeOn(date).length;
+      // Eligiendo la salida vale cualquier día hasta donde quede una cabaña libre todo el rango.
+      const canOut = pickingOut && date > checkIn && freeBetween(checkIn, date).length > 0;
+      const disabled = date < today || (busy && !canOut && free === 0);
       if (t === today.getTime()) cls.push('is-today');
       if (checkIn && t === checkIn.getTime()) cls.push('is-start');
       if (checkOut && t === checkOut.getTime()) cls.push('is-end');
       if (checkIn && checkOut && t > checkIn && t < checkOut) cls.push('in-range');
-      html += `<button type="button" class="${cls.join(' ')}" data-date="${t}" ${date < today ? 'disabled' : ''} aria-label="${fmtLong(date)}">${d}</button>`;
+      if (busy && date >= today && free === 0) cls.push('is-full');
+      else if (busy && date >= today && free <= 2) cls.push('is-few');
+      const status = !busy || date < today ? '' : free === 0 ? ', sin cabañas libres' : `, ${free} ${free === 1 ? 'cabaña libre' : 'cabañas libres'}`;
+      html += `<button type="button" class="${cls.join(' ')}" data-date="${t}" ${disabled ? 'disabled' : ''} aria-label="${fmtLong(date)}${status}">${d}</button>`;
     }
     return html + '</div></div>';
   };
@@ -172,6 +205,20 @@
     $('[data-in]').textContent = fmt(checkIn);
     $('[data-out]').textContent = checkOut ? fmt(checkOut) : '—';
     $('[data-nights]').textContent = checkOut ? nights() : '—';
+
+    // Cabañas libres en todo el rango: se informan y se marcan en el selector.
+    const freeRow = $('[data-free-row]');
+    const free = checkOut ? freeBetween(checkIn, checkOut) : [];
+    freeRow.hidden = !(busy && checkOut);
+    $('[data-free]').textContent = free.map(c => c.id).join(', ') || 'ninguna';
+    [...cabinSelect.options].forEach(o => {
+      if (!o.value) return;
+      const c = cabins.find(c => String(c.id) === o.value);
+      const taken = busy && checkOut && !free.includes(c);
+      o.disabled = !!taken;
+      o.textContent = `${c.name} · ${c.capacity}${taken ? ' (ocupada esas fechas)' : ''}`;
+      if (taken && cabinSelect.value === o.value) cabinSelect.value = '';
+    });
   };
 
   calEl.addEventListener('click', e => {
@@ -185,6 +232,7 @@
   $('[data-cal-prev]').addEventListener('click', () => { viewMonth.setMonth(viewMonth.getMonth() - 1); renderCal(); });
   $('[data-cal-next]').addEventListener('click', () => { viewMonth.setMonth(viewMonth.getMonth() + 1); renderCal(); });
   renderCal();
+  loadAvailability();
 
   const steps = $$('[data-step]');
   const labels = $$('[data-step-label]');

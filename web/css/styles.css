@@ -283,6 +283,17 @@ p { margin: 0 0 1em; }
 .cal-day.in-range { background: var(--sauce); box-shadow: none; }
 .cal-day.is-start, .cal-day.is-end { background: var(--forest); color: var(--cream); box-shadow: none; }
 .cal-day.is-today { text-decoration: underline; text-underline-offset: 3px; }
+/* Disponibilidad publicada por la app de gestión */
+.cal-day { position: relative; }
+.cal-day.is-full { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.cal-day.is-full:not(.in-range):not(.is-start):not(.is-end) { background: rgba(185,81,47,.08); color: rgba(185,81,47,.55); box-shadow: none; }
+.cal-day.is-few::after { content: ''; position: absolute; left: 50%; bottom: 14%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--ocre); }
+.cal-legend { display: none; list-style: none; padding: 0; margin: 18px 0 0; gap: 18px; flex-wrap: wrap; font-size: .8rem; font-weight: 600; color: var(--ink-soft); }
+.has-availability + .cal-legend { display: flex; }
+.cal-legend li { display: inline-flex; align-items: center; gap: 7px; }
+.cal-key { width: 16px; height: 16px; border-radius: 4px; background: #fff; box-shadow: inset 0 0 0 1.5px rgba(35,75,51,.15); position: relative; }
+.cal-key--few::after { content: ''; position: absolute; left: 50%; bottom: 2px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--ocre); }
+.cal-key--full { background: rgba(185,81,47,.12); box-shadow: none; }
 
 .step-foot { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 28px; flex-wrap: wrap; }
 .hint { margin: 0; font-size: .9rem; color: var(--ink-soft); }

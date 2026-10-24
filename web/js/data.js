@@ -1,6 +1,9 @@
 // Contenido del sitio: editá acá las cabañas y las opiniones.
 window.SITE = {
   whatsapp: '5401126978208',
+  // Proyecto de Firebase de la app de gestión ("flutter app"): de ahí sale qué
+  // noches están ocupadas. Vacío = el calendario no muestra disponibilidad.
+  firebaseProjectId: '',
 
   cabins: [
     {

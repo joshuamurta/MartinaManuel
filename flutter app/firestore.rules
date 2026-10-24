@@ -1,0 +1,79 @@
+rules_version = '2';
+
+// Roles: 'admin' (todo), 'user' (diagrama, reservas, mantenimiento), 'pending' (sin acceso).
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function profilePath() { return /databases/$(db)/documents/users/$(request.auth.uid); }
+    function me() { return get(profilePath()).data; }
+    function worker() { return signedIn() && exists(profilePath()) && me().active == true && me().role in ['admin', 'user']; }
+    function admin() { return signedIn() && exists(profilePath()) && me().active == true && me().role == 'admin'; }
+
+    // Noches ocupadas (sin datos de huéspedes): la lee la web pública.
+    match /public/{doc} {
+      allow read: if true;
+      allow write: if worker();
+    }
+
+    match /settings/{doc} {
+      allow read: if worker();
+      allow write: if admin();
+    }
+
+    match /reservations/{id} {
+      allow read, create, update: if worker();
+      allow delete: if admin();
+    }
+
+    match /maintenance/{id} {
+      allow read, create, update: if worker();
+      allow delete: if admin();
+    }
+
+    // Caja: la ven sólo los admins. Un usuario puede registrar el cobro de
+    // una reserva, que deja su ingreso en la caja.
+    match /movements/{id} {
+      allow read: if admin();
+      allow create, update: if admin() || (worker() && request.resource.data.reservationId is string && request.resource.data.category == 'Reservas');
+      allow delete: if admin() || (worker() && resource.data.reservationId is string);
+    }
+
+    match /users/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid) || admin();
+
+      // Primer ingreso: pendiente, con el rol de su invitación, o admin si nadie configuró la app todavía.
+      allow create: if admin() || (
+        signedIn() && request.auth.uid == uid
+        && request.resource.data.email == myEmail()
+        && request.resource.data.active == true
+        && (
+          request.resource.data.role == 'pending'
+          || (exists(/databases/$(db)/documents/invites/$(myEmail()))
+              && get(/databases/$(db)/documents/invites/$(myEmail())).data.role == request.resource.data.role)
+          || (request.resource.data.role == 'admin'
+              && !exists(/databases/$(db)/documents/meta/setup)
+              && existsAfter(/databases/$(db)/documents/meta/setup))
+        )
+      );
+
+      // Un admin no puede quitarse a sí mismo el rol ni desactivarse (para no quedar afuera).
+      allow update: if admin() && (request.auth.uid != uid || (request.resource.data.role == 'admin' && request.resource.data.active == true));
+      allow delete: if admin() && request.auth.uid != uid;
+    }
+
+    match /invites/{email} {
+      allow read: if admin() || (signedIn() && myEmail() == email);
+      allow create, update: if admin();
+      allow delete: if admin() || (signedIn() && myEmail() == email);
+    }
+
+    match /meta/setup {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && !exists(/databases/$(db)/documents/meta/setup)
+        && getAfter(profilePath()).data.role == 'admin';
+    }
+  }
+}
