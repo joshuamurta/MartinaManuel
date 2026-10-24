@@ -3,7 +3,7 @@ window.SITE = {
   whatsapp: '5401126978208',
   // Proyecto de Firebase de la app de gestión ("flutter app"): de ahí sale qué
   // noches están ocupadas. Vacío = el calendario no muestra disponibilidad.
-  firebaseProjectId: '',
+  firebaseProjectId: 'martina-manuel-gestion',
 
   cabins: [
     {

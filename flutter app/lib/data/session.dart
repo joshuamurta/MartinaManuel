@@ -12,6 +12,13 @@ import '../models.dart';
 class Session extends ChangeNotifier {
   Session() {
     _authSub = _auth.authStateChanges().listen(_onAuth);
+    // Al volver del login de Google (redirección) muestra el error si lo hubo.
+    if (kIsWeb) {
+      _auth.getRedirectResult().then((_) {}, onError: (Object e) {
+        error = authErrorText(e);
+        notifyListeners();
+      });
+    }
   }
 
   final _auth = FirebaseAuth.instance;
@@ -96,7 +103,9 @@ class Session extends ChangeNotifier {
   Future<void> signInWithGoogle() async {
     final provider = GoogleAuthProvider()..setCustomParameters({'prompt': 'select_account'});
     if (kIsWeb) {
-      await _auth.signInWithPopup(provider);
+      // Redirección en la misma pestaña: las ventanas emergentes fallan en
+      // muchos navegadores de celular. Al volver, authStateChanges ya trae al usuario.
+      await _auth.signInWithRedirect(provider);
     } else {
       await _auth.signInWithProvider(provider);
     }

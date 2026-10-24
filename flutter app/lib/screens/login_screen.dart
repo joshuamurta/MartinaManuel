@@ -107,10 +107,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 alignment: Alignment.centerRight,
                 child: TextButton(onPressed: _busy ? null : _forgot, child: const Text('Olvidé mi contraseña')),
               ),
-              if (_error != null)
+              if ((_error ?? session.error) != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(_error!, style: const TextStyle(color: MM.canyon, fontWeight: FontWeight.w600)),
+                  child: Text((_error ?? session.error)!, style: const TextStyle(color: MM.canyon, fontWeight: FontWeight.w600)),
                 ),
               FilledButton(
                 onPressed: _busy ? null : () => _submit(session),

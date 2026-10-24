@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "999911195188",
+    "project_id": "martina-manuel-gestion",
+    "storage_bucket": "martina-manuel-gestion.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:999911195188:android:31d1a8be2908e76d418061",
+        "android_client_info": {
+          "package_name": "ar.martinamanuel.martina_manuel"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "999911195188-qv51hqdocto824ugogb0f37sglhau8eb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ar.martinamanuel.martina_manuel",
+            "certificate_hash": "7a34aafc7e97da2137e6e9603ebb272ac30ab187"
+          }
+        },
+        {
+          "client_id": "999911195188-r7i76geni9s3b3e8rhd1m16m6n25lh8a.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB35mMLMsedGhHThOV3SEP-h7JVJ_RR8tw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "999911195188-r7i76geni9s3b3e8rhd1m16m6n25lh8a.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

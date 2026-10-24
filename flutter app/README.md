@@ -1,5 +1,7 @@
 # Martina Manuel · Gestión
 
+En uso: proyecto Firebase `martina-manuel-gestion`, app web en <https://martina-manuel-gestion.web.app>.
+
 App Flutter (web + Android) para manejar el complejo: reemplaza la planilla
 `PLANILLA DE RESERVAS.xlsx` y el ida y vuelta por WhatsApp. Usa Firebase
 (Auth + Firestore) y publica las noches ocupadas para el calendario de la web
@@ -36,6 +38,11 @@ con Google sin invitación queda "pendiente" hasta que un admin lo aprueba.
    dart pub global activate flutterfire_cli
    flutterfire configure --platforms=web,android
    ```
+   Después, en `lib/firebase_options.dart` dejar el `authDomain` de web igual al
+   dominio donde se publica la app (`<proyecto>.web.app`) y agregar
+   `https://<proyecto>.web.app/__/auth/handler` como URI de redireccionamiento del
+   cliente OAuth web en Google Cloud → Credenciales. Sin eso, entrar con Google
+   desde el celular vuelve a la pantalla de ingreso sin iniciar sesión.
 3. **Reglas de seguridad**:
    ```sh
    firebase use --add            # elegir el proyecto
