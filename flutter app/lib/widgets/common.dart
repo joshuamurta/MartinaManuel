@@ -79,7 +79,8 @@ class StatusDot extends StatelessWidget {
 
 /// Referencias de color del diagrama.
 class ColorLegend extends StatelessWidget {
-  const ColorLegend({super.key});
+  const ColorLegend({super.key, this.money = true});
+  final bool money; // sin permiso de montos no se sabe qué está pagado
 
   @override
   Widget build(BuildContext context) {
@@ -89,8 +90,8 @@ class ColorLegend extends StatelessWidget {
           Text(t, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
         ]);
     return Wrap(spacing: 14, runSpacing: 6, children: [
-      item(MM.sauce, 'Pagada'),
-      item(MM.alamo, 'Con saldo'),
+      item(MM.sauce, money ? 'Pagada' : 'Confirmada'),
+      if (money) item(MM.alamo, 'Con saldo'),
       item(MM.ocre, 'Consulta / sin seña'),
       item(const Color(0xFFD9D6D0), 'Bloqueo'),
       item(MM.ocre.withValues(alpha: .25), 'Feriado'),

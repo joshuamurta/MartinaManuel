@@ -1,6 +1,9 @@
 rules_version = '2';
 
-// Roles: 'admin' (todo), 'user' (diagrama, reservas, mantenimiento), 'pending' (sin acceso).
+// Roles: 'admin' (todo), 'encargado' y 'staff' (lo que digan sus permisos),
+// 'pending' (sin acceso). 'user' es el rol viejo y equivale a encargado.
+// Permisos en users/{uid}.perms: nivel 0 no ve, 1 ve, 2 edita. Sin perms
+// valen los del rol (los mismos que defaultPerms en lib/models.dart).
 service cloud.firestore {
   match /databases/{db}/documents {
 
@@ -8,13 +11,23 @@ service cloud.firestore {
     function myEmail() { return request.auth.token.email.lower(); }
     function profilePath() { return /databases/$(db)/documents/users/$(request.auth.uid); }
     function me() { return get(profilePath()).data; }
-    function worker() { return signedIn() && exists(profilePath()) && me().active == true && me().role in ['admin', 'user']; }
+    function worker() { return signedIn() && exists(profilePath()) && me().active == true && me().role in ['admin', 'encargado', 'user', 'staff']; }
     function admin() { return signedIn() && exists(profilePath()) && me().active == true && me().role == 'admin'; }
+
+    function defaults(role) {
+      return role == 'staff' ? {'mantenimiento': 2}
+        : role in ['encargado', 'user'] ? {'reservas': 2, 'mantenimiento': 2}
+        : {};
+    }
+    function level(key) { return me().get('perms', defaults(me().role)).get(key, 0); }
+    function can(key, lvl) { return admin() || (worker() && level(key) >= lvl); }
+
+    function moneyKeys() { return ['total', 'nightlyPrice', 'balanceUsd', 'payments', 'invoiceNo', 'invoiceDate', 'priceNote']; }
 
     // Noches ocupadas (sin datos de huéspedes): la lee la web pública.
     match /public/{doc} {
       allow read: if true;
-      allow write: if worker();
+      allow write: if can('reservas', 2);
     }
 
     match /settings/{doc} {
@@ -22,37 +35,54 @@ service cloud.firestore {
       allow write: if admin();
     }
 
+    // La plata de cada reserva va aparte, en reservationMoney.
     match /reservations/{id} {
-      allow read, create, update: if worker();
-      allow delete: if admin();
+      allow read: if can('reservas', 1);
+      allow create, update: if can('reservas', 2) && !request.resource.data.keys().hasAny(moneyKeys());
+      allow delete: if can('reservas', 2) && can('eliminar', 2);
+    }
+
+    match /reservationMoney/{id} {
+      allow read: if can('montos', 1) || can('numeros', 1);
+      allow write: if can('montos', 2);
+      allow delete: if can('reservas', 2) && can('eliminar', 2);
     }
 
     match /maintenance/{id} {
-      allow read, create, update: if worker();
-      allow delete: if admin();
+      allow read: if can('mantenimiento', 1);
+      allow create, update: if can('mantenimiento', 2) && !('cost' in request.resource.data);
+      allow delete: if can('mantenimiento', 2) && can('eliminar', 2);
     }
 
-    // Caja: la ven sólo los admins. Un usuario puede registrar el cobro de
-    // una reserva, que deja su ingreso en la caja.
+    match /maintenanceCosts/{id} {
+      allow read: if can('costos', 1);
+      allow write: if can('costos', 2);
+      allow delete: if can('mantenimiento', 2) && can('eliminar', 2);
+    }
+
+    // Caja. Quien puede cobrar reservas deja el ingreso de ese cobro.
     match /movements/{id} {
-      allow read: if admin();
-      allow create, update: if admin() || (worker() && request.resource.data.reservationId is string && request.resource.data.category == 'Reservas');
-      allow delete: if admin() || (worker() && resource.data.reservationId is string);
+      allow read: if can('caja', 1);
+      allow create, update: if can('caja', 2) || (can('montos', 2) && request.resource.data.reservationId is string && request.resource.data.category == 'Reservas');
+      allow delete: if can('caja', 2) || (can('montos', 2) && resource.data.reservationId is string);
     }
 
     match /users/{uid} {
       allow read: if (signedIn() && request.auth.uid == uid) || admin();
 
-      // Primer ingreso: pendiente, con el rol de su invitación, o admin si nadie configuró la app todavía.
+      // Primer ingreso: pendiente, con el rol y permisos de su invitación, o
+      // admin si nadie configuró la app todavía. Nadie se pone permisos solo.
       allow create: if admin() || (
         signedIn() && request.auth.uid == uid
         && request.resource.data.email == myEmail()
         && request.resource.data.active == true
         && (
-          request.resource.data.role == 'pending'
+          (request.resource.data.role == 'pending' && !('perms' in request.resource.data))
           || (exists(/databases/$(db)/documents/invites/$(myEmail()))
-              && get(/databases/$(db)/documents/invites/$(myEmail())).data.role == request.resource.data.role)
+              && get(/databases/$(db)/documents/invites/$(myEmail())).data.role == request.resource.data.role
+              && get(/databases/$(db)/documents/invites/$(myEmail())).data.get('perms', null) == request.resource.data.get('perms', null))
           || (request.resource.data.role == 'admin'
+              && !('perms' in request.resource.data)
               && !exists(/databases/$(db)/documents/meta/setup)
               && existsAfter(/databases/$(db)/documents/meta/setup))
         )
@@ -74,6 +104,11 @@ service cloud.firestore {
       allow create: if signedIn()
         && !exists(/databases/$(db)/documents/meta/setup)
         && getAfter(profilePath()).data.role == 'admin';
+    }
+
+    match /meta/migrations {
+      allow read: if signedIn();
+      allow write: if admin();
     }
   }
 }

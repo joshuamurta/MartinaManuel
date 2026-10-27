@@ -27,27 +27,85 @@ String fmtMoney(num? v) => v == null ? '—' : '${v < 0 ? '-' : ''}\$ ${_money.f
 
 // ---------- Usuarios ----------
 
-enum Role { admin, user, pending }
+enum Role { admin, encargado, staff, pending }
 
-Role roleFrom(String? s) => Role.values.firstWhere((r) => r.name == s, orElse: () => Role.pending);
+/// 'user' es el rol que existía antes de los permisos: equivale a encargado.
+Role roleFrom(String? s) => s == 'user' ? Role.encargado : Role.values.firstWhere((r) => r.name == s, orElse: () => Role.pending);
 
 String roleLabel(Role r) => switch (r) {
       Role.admin => 'Administrador',
-      Role.user => 'Usuario',
+      Role.encargado => 'Encargado',
+      Role.staff => 'Staff',
       Role.pending => 'Pendiente de aprobación',
     };
 
+String roleHelp(Role r) => switch (r) {
+      Role.admin => 'Ve y hace todo, incluidos usuarios y ajustes.',
+      Role.encargado => 'Diagrama, reservas y mantenimiento, sin montos ni caja.',
+      Role.staff => 'Sólo sus tareas de mantenimiento, sin costos.',
+      Role.pending => 'Sin acceso.',
+    };
+
+/// Qué puede hacer cada usuario que no es administrador. Nivel 0 = no ve,
+/// 1 = ve, 2 = edita. Se guarda en users/{uid}.perms y firestore.rules lo
+/// hace cumplir con los mismos valores por defecto.
+class PermDef {
+  const PermDef(this.key, this.label, this.help, this.levels);
+  final String key;
+  final String label;
+  final String help;
+  final Map<int, String> levels;
+}
+
+const permDefs = [
+  PermDef('reservas', 'Diagrama y reservas', 'Huéspedes, fechas y contacto', {0: 'No ve', 1: 'Ve', 2: 'Edita'}),
+  PermDef('montos', 'Montos de reservas', 'Total, pagos, saldo y factura', {0: 'No ve', 1: 'Ve', 2: 'Cobra'}),
+  PermDef('mantenimiento', 'Mantenimiento', 'Arreglos e historial', {0: 'No ve', 1: 'Ve', 2: 'Edita'}),
+  PermDef('costos', 'Costos de mantenimiento', 'Cuánto salió cada arreglo', {0: 'No ve', 1: 'Ve', 2: 'Edita'}),
+  PermDef('caja', 'Caja', 'Saldos, movimientos y gastos', {0: 'No ve', 1: 'Ve', 2: 'Edita'}),
+  PermDef('numeros', 'Números', 'Ocupación y facturación', {0: 'No ve', 1: 'Ve'}),
+  PermDef('eliminar', 'Eliminar', 'Borrar reservas y arreglos', {0: 'No', 2: 'Sí'}),
+];
+
+/// Permisos de cada rol mientras el admin no los cambie.
+Map<String, int> defaultPerms(Role r) => switch (r) {
+      Role.admin => {for (final d in permDefs) d.key: d.levels.keys.last},
+      Role.encargado => {'reservas': 2, 'mantenimiento': 2},
+      Role.staff => {'mantenimiento': 2},
+      Role.pending => {},
+    };
+
+class Perms {
+  const Perms(this.levels, {this.admin = false});
+  static const none = Perms({});
+  final Map<String, int> levels;
+  final bool admin;
+
+  int level(String key) => admin ? 2 : (levels[key] ?? 0);
+  bool can(String key) => level(key) >= 1;
+  bool canEdit(String key) => level(key) >= 2;
+
+  bool get money => can('montos');
+  bool get editMoney => canEdit('montos');
+  bool get costs => can('costos');
+  bool get editCosts => canEdit('costos');
+  bool get delete => canEdit('eliminar');
+  bool get readsMoney => money || can('numeros');
+}
+
 class AppUser {
-  AppUser({required this.uid, required this.email, required this.name, required this.role, required this.active, this.provider});
+  AppUser({required this.uid, required this.email, required this.name, required this.role, required this.active, this.provider, this.customPerms});
   final String uid;
   final String email;
   final String name;
   final Role role;
   final bool active;
   final String? provider;
+  final Map<String, int>? customPerms; // null = los del rol
 
   bool get isAdmin => role == Role.admin && active;
-  bool get canWork => (role == Role.admin || role == Role.user) && active;
+  bool get canWork => role != Role.pending && active;
+  Perms get perms => !active ? Perms.none : Perms(customPerms ?? defaultPerms(role), admin: isAdmin);
 
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? {};
@@ -58,6 +116,7 @@ class AppUser {
       role: roleFrom(m['role']),
       active: m['active'] ?? true,
       provider: m['provider'],
+      customPerms: m['perms'] == null ? null : {for (final e in (m['perms'] as Map).entries) '${e.key}': (e.value as num).toInt()},
     );
   }
 }
@@ -162,6 +221,7 @@ class Reservation {
     this.crib = false,
     this.invoiceNo,
     this.invoiceDate,
+    this.priceNote,
     this.notes,
     this.reservedAt,
     this.warnings = const [],
@@ -188,6 +248,7 @@ class Reservation {
   bool crib;
   String? invoiceNo;
   String? invoiceDate;
+  String? priceNote; // aclaración de la tarifa (viene de la planilla)
   String? notes;
   String? reservedAt;
   List<String> warnings; // avisos de la importación para revisar
@@ -210,6 +271,32 @@ class Reservation {
 
   String get cabinsLabel => cabins.length == 1 ? 'Cabaña ${cabins.first}' : 'Cabañas ${cabins.join(', ')}';
 
+  /// Campos de plata: viven en reservationMoney/{id}, que sólo leen quienes
+  /// tienen permiso de montos (Firestore no puede ocultar campos sueltos).
+  static const moneyKeys = ['total', 'nightlyPrice', 'balanceUsd', 'payments', 'invoiceNo', 'invoiceDate', 'priceNote'];
+
+  Map<String, dynamic> moneyMap() => {
+        'total': total,
+        'nightlyPrice': nightlyPrice,
+        'balanceUsd': balanceUsd,
+        'payments': payments.map((p) => p.toMap()).toList(),
+        'invoiceNo': invoiceNo,
+        'invoiceDate': invoiceDate,
+        'priceNote': priceNote,
+      };
+
+  Reservation withMoney(Map<String, dynamic>? m) {
+    if (m == null) return this;
+    total = m['total'];
+    nightlyPrice = m['nightlyPrice'];
+    balanceUsd = m['balanceUsd'];
+    payments = [for (final p in (m['payments'] as List? ?? const [])) Payment.fromMap(Map<String, dynamic>.from(p))];
+    invoiceNo = m['invoiceNo'];
+    invoiceDate = m['invoiceDate'];
+    priceNote = m['priceNote'];
+    return this;
+  }
+
   Map<String, dynamic> toMap() => {
         'name': name,
         'nameLower': name.toLowerCase(),
@@ -221,15 +308,9 @@ class Reservation {
         'contact': contact,
         'email': email,
         'channel': channel,
-        'total': total,
-        'nightlyPrice': nightlyPrice,
-        'balanceUsd': balanceUsd,
-        'payments': payments.map((p) => p.toMap()).toList(),
         'breakfast': breakfast,
         'pets': pets,
         'crib': crib,
-        'invoiceNo': invoiceNo,
-        'invoiceDate': invoiceDate,
         'notes': notes,
         'reservedAt': reservedAt,
         'warnings': warnings,
@@ -239,7 +320,10 @@ class Reservation {
 
   factory Reservation.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) => Reservation.fromMap(d.data() ?? {}, id: d.id);
 
-  factory Reservation.fromMap(Map<String, dynamic> m, {String? id}) => Reservation(
+  /// Lee también los campos de plata si vienen en el mismo mapa (importación).
+  factory Reservation.fromMap(Map<String, dynamic> m, {String? id}) => Reservation._fromMap(m, id: id).withMoney(m);
+
+  factory Reservation._fromMap(Map<String, dynamic> m, {String? id}) => Reservation(
         id: id ?? m['id'],
         name: m['name'] ?? '',
         cabins: List<int>.from(m['cabins'] ?? const []),
@@ -250,15 +334,9 @@ class Reservation {
         contact: m['contact'],
         email: m['email'],
         channel: m['channel'],
-        total: m['total'],
-        nightlyPrice: m['nightlyPrice'],
-        balanceUsd: m['balanceUsd'],
-        payments: [for (final p in (m['payments'] as List? ?? const [])) Payment.fromMap(Map<String, dynamic>.from(p))],
         breakfast: m['breakfast'] ?? false,
         pets: m['pets'] ?? false,
         crib: m['crib'] ?? false,
-        invoiceNo: m['invoiceNo'],
-        invoiceDate: m['invoiceDate'],
         notes: m['notes'],
         reservedAt: m['reservedAt'],
         warnings: List<String>.from(m['warnings'] ?? const []),
@@ -280,7 +358,6 @@ class Reservation {
         Payment(id: '${m['id']}-p0', date: m['reservedAt'] ?? m['checkIn'], amount: paid, note: 'Cobrado según la planilla', imported: true),
     ];
     if (m['diagramLabel'] != null) r.notes = [r.notes, 'Diagrama: ${m['diagramLabel']}'].whereType<String>().join(' · ');
-    if (m['priceNote'] != null) r.notes = [r.notes, 'Tarifa: ${m['priceNote']}'].whereType<String>().join(' · ');
     return r;
   }
 }
@@ -333,12 +410,12 @@ class MaintenanceItem {
   String kind; // reparacion | preventivo | mejora
   String? createdBy;
 
+  /// El costo va aparte, en maintenanceCosts/{id}, para que el staff no lo vea.
   Map<String, dynamic> toMap() => {
         'area': area,
         'title': title,
         'date': date,
         'description': description,
-        'cost': cost,
         'provider': provider,
         'status': status.name,
         'kind': kind,

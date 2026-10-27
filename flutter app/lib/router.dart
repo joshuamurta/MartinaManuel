@@ -14,7 +14,22 @@ import 'screens/settings_screen.dart';
 import 'screens/users_screen.dart';
 import 'widgets/shell.dart';
 
-const adminOnly = {'/caja', '/numeros', '/usuarios', '/ajustes'};
+/// Permiso que hace falta para cada sección ('admin' = sólo administradores).
+const _sections = {
+  '/diagrama': 'reservas',
+  '/reservas': 'reservas',
+  '/mantenimiento': 'mantenimiento',
+  '/caja': 'caja',
+  '/numeros': 'numeros',
+  '/usuarios': 'admin',
+  '/ajustes': 'admin',
+};
+
+bool canOpen(Session session, String loc) {
+  final key = _sections.entries.where((e) => loc.startsWith(e.key)).firstOrNull?.value;
+  if (key == null) return true;
+  return key == 'admin' ? session.isAdmin : session.perms.can(key);
+}
 
 GoRouter buildRouter(Session session) => GoRouter(
       refreshListenable: session,
@@ -29,7 +44,9 @@ GoRouter buildRouter(Session session) => GoRouter(
         if (!session.signedIn) return gate('/login');
         if (!session.canWork) return gate('/pendiente');
         if (gates.contains(loc)) return target ?? '/';
-        if (adminOnly.any(loc.startsWith) && !session.isAdmin) return '/';
+        if (!canOpen(session, loc)) return '/';
+        if (loc == '/reservas/nueva' && !session.perms.canEdit('reservas')) return '/reservas';
+        if (loc.endsWith('/editar') && !session.perms.canEdit('reservas')) return loc.substring(0, loc.length - '/editar'.length);
         return null;
       },
       routes: [

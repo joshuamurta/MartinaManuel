@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/repo.dart';
+import '../main.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -43,13 +44,15 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
     }
 
     return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/reservas/nueva'),
-        backgroundColor: MM.ink,
-        foregroundColor: MM.cream,
-        icon: const Icon(Icons.add),
-        label: const Text('Nueva'),
-      ),
+      floatingActionButton: !SessionScope.of(context).perms.canEdit('reservas')
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => context.push('/reservas/nueva'),
+              backgroundColor: MM.ink,
+              foregroundColor: MM.cream,
+              icon: const Icon(Icons.add),
+              label: const Text('Nueva'),
+            ),
       body: PageBody(children: [
         const SectionHead(sticker: 'Reservas', title: 'Huéspedes'),
         TextField(

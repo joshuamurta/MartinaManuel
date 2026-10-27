@@ -14,15 +14,25 @@ App Flutter (web + Android) para manejar el complejo: reemplaza la planilla
 | **Hoy**: quién llega, quién se va, cabañas ocupadas esta noche, saldos a cobrar, consultas sin seña, mantenimiento pendiente | WhatsApp / memoria | todos |
 | **Diagrama**: cabañas × noches del mes, con nombre y personas; tocar la primera y la última noche libre crea la reserva; feriados resaltados y % de ocupación | hoja `diagrama` | todos |
 | **Reservas**: búsqueda, ficha con pagos, saldo, factura, canal, desayuno/mascota/cuna, mensajes de WhatsApp listos (confirmación, pedir seña, recordatorio, pedir opinión) | hojas `desarrollo …` | todos |
-| **Mantenimiento**: historial por cabaña y por servicio (piscinas, jacuzzi, parque, fogón…), con costo, proveedor y estado | — (nuevo) | todos |
+| **Mantenimiento**: historial por cabaña y por servicio (piscinas, jacuzzi, parque, fogón…), con costo, proveedor y estado | — (nuevo) | todos (el costo, según permisos) |
 | **Caja**: saldos por cuenta (caja, Francés, Patagonia, MP Claudio, MP Euge, dólares), movimientos y gastos del mes por rubro. Los cobros de reservas entran solos | `CAJA`, `BANCO FRANCES`, `MERC. PAGO`, `GASTOS MENSUALES` | admin |
 | **Números**: ocupación y facturación por mes, noches por cabaña, de dónde vienen las reservas | columna de % del diagrama | admin |
 | **Usuarios**: alta (Google o usuario/contraseña), cambio de rol, desactivar, aprobar pedidos de acceso | — | admin |
 | **Ajustes**: tarifas, horarios, datos para la seña, feriados, importar la planilla, republicar disponibilidad | — | admin |
 
-Roles: **administrador** (todo) y **usuario** (diagrama, reservas, cobros y
-mantenimiento; no ve la caja ni los números). Las reglas de `firestore.rules`
-lo hacen cumplir también del lado del servidor.
+Roles:
+- **Administrador**: ve y hace todo, incluidos Usuarios y Ajustes.
+- **Encargado**: diagrama, reservas y mantenimiento, sin montos, costos, caja ni números.
+- **Staff**: sólo mantenimiento, sin costos.
+
+En **Usuarios** el admin ajusta a cada uno qué ve y qué puede hacer (no ve /
+ve / edita) en reservas, montos de reservas, mantenimiento, costos, caja,
+números y eliminar. Las reglas de `firestore.rules` lo hacen cumplir también
+del lado del servidor. Para eso los montos de cada reserva van en
+`reservationMoney/{id}` y los costos de mantenimiento en
+`maintenanceCosts/{id}`: Firestore no puede ocultar campos sueltos de un
+documento. Después de actualizar desde una versión anterior hay que tocar
+**Ajustes → Separar montos** una vez.
 
 El **primer** usuario que entra queda como administrador. Después, quien entra
 con Google sin invitación queda "pendiente" hasta que un admin lo aprueba.

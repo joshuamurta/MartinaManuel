@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/repo.dart';
@@ -30,7 +31,8 @@ class UsersScreen extends StatelessWidget {
           return PageBody(maxWidth: 900, children: [
             const SectionHead(sticker: 'Usuarios', title: 'Quién usa la app'),
             const Text(
-              'Administrador: ve todo, incluida la caja, los números y los ajustes. Usuario: diagrama, reservas, cobros y mantenimiento.',
+              'Administrador: ve y hace todo. Encargado: diagrama, reservas y mantenimiento, sin montos ni caja. '
+              'Staff: sólo mantenimiento, sin costos. Tocá un usuario para ajustar qué ve y qué puede hacer.',
               style: TextStyle(color: MM.inkSoft),
             ),
             if (pending.isNotEmpty) ...[
@@ -44,7 +46,7 @@ class UsersScreen extends StatelessWidget {
                       subtitle: Text(u.email),
                       trailing: Wrap(spacing: 4, children: [
                         TextButton(onPressed: () => Repo.instance.deleteUserProfile(u.uid), child: const Text('Rechazar')),
-                        FilledButton(onPressed: () => Repo.instance.updateUser(u.uid, role: Role.user), child: const Text('Aprobar')),
+                        FilledButton(onPressed: () => showPermsSheet(context, u), child: const Text('Aprobar')),
                       ]),
                     ),
                 ]),
@@ -96,6 +98,7 @@ class _UserTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListTile(
+        onTap: isMe ? null : () => showPermsSheet(context, user),
         leading: CircleAvatar(
           backgroundColor: user.active ? (user.role == Role.admin ? MM.ink : MM.sauce) : MM.sand,
           child: Text(
@@ -104,14 +107,19 @@ class _UserTile extends StatelessWidget {
           ),
         ),
         title: Text('${user.name}${isMe ? ' (vos)' : ''}', style: TextStyle(fontWeight: FontWeight.w700, color: user.active ? MM.ink : MM.inkSoft)),
-        subtitle: Text('${user.email} · ${user.provider == 'google.com' ? 'Google' : 'usuario y contraseña'}${user.active ? '' : ' · desactivado'}'),
+        subtitle: Text([
+          user.email,
+          user.provider == 'google.com' ? 'Google' : 'usuario y contraseña',
+          if (user.customPerms != null && user.role != Role.admin) 'permisos a medida',
+          if (!user.active) 'desactivado',
+        ].join(' · ')),
         trailing: isMe
             ? InfoChip(roleLabel(user.role))
             : PopupMenuButton<String>(
                 tooltip: 'Opciones',
                 onSelected: (v) => _action(context, v),
                 itemBuilder: (_) => [
-                  PopupMenuItem(value: 'role', child: Text(user.role == Role.admin ? 'Pasar a usuario' : 'Hacer administrador')),
+                  const PopupMenuItem(value: 'perms', child: Text('Rol y permisos')),
                   const PopupMenuItem(value: 'name', child: Text('Cambiar nombre')),
                   if (user.provider != 'google.com') const PopupMenuItem(value: 'reset', child: Text('Mandar email para cambiar contraseña')),
                   PopupMenuItem(value: 'active', child: Text(user.active ? 'Desactivar' : 'Activar')),
@@ -127,8 +135,8 @@ class _UserTile extends StatelessWidget {
   Future<void> _action(BuildContext context, String v) async {
     final repo = Repo.instance;
     switch (v) {
-      case 'role':
-        await repo.updateUser(user.uid, role: user.role == Role.admin ? Role.user : Role.admin);
+      case 'perms':
+        await showPermsSheet(context, user);
       case 'active':
         await repo.updateUser(user.uid, active: !user.active);
       case 'reset':
@@ -166,7 +174,8 @@ class _NewUserDialogState extends State<_NewUserDialog> {
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _pass = TextEditingController();
-  Role _role = Role.user;
+  Role _role = Role.encargado;
+  Map<String, int> _perms = defaultPerms(Role.encargado);
   bool _google = true;
   bool _busy = false;
   String? _error;
@@ -183,10 +192,10 @@ class _NewUserDialogState extends State<_NewUserDialog> {
     });
     try {
       if (_google) {
-        await Repo.instance.invite(email, _name.text.trim(), _role);
+        await Repo.instance.invite(email, _name.text.trim(), _role, perms: customPerms(_role, _perms));
       } else {
         final uid = await Session.createPasswordAccount(email, _pass.text);
-        await Repo.instance.createUserProfile(uid, email, _name.text.trim(), _role);
+        await Repo.instance.createUserProfile(uid, email, _name.text.trim(), _role, perms: customPerms(_role, _perms));
       }
       if (mounted) {
         Navigator.pop(context);
@@ -209,7 +218,8 @@ class _NewUserDialogState extends State<_NewUserDialog> {
         title: Text('Agregar usuario', style: MM.display(24)),
         content: SizedBox(
           width: 420,
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(value: true, label: Text('Entra con Google')),
@@ -226,22 +236,114 @@ class _NewUserDialogState extends State<_NewUserDialog> {
               const SizedBox(height: 12),
               TextField(controller: _pass, decoration: const InputDecoration(labelText: 'Contraseña inicial', helperText: 'Mínimo 6 caracteres')),
             ],
-            const SizedBox(height: 12),
-            DropdownButtonFormField<Role>(
-              initialValue: _role,
-              decoration: const InputDecoration(labelText: 'Rol'),
-              items: const [
-                DropdownMenuItem(value: Role.user, child: Text('Usuario')),
-                DropdownMenuItem(value: Role.admin, child: Text('Administrador')),
-              ],
-              onChanged: (v) => setState(() => _role = v ?? Role.user),
+            const SizedBox(height: 16),
+            PermsEditor(
+              role: _role,
+              perms: _perms,
+              onChanged: (role, perms) => setState(() {
+                _role = role;
+                _perms = perms;
+              }),
             ),
             if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: MM.canyon))),
           ]),
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
           FilledButton(onPressed: _busy ? null : _save, child: Text(_busy ? 'Guardando…' : 'Agregar')),
         ],
       );
+}
+
+/// Permisos a guardar: null si son los del rol (o si es admin, que ve todo).
+Map<String, int>? customPerms(Role role, Map<String, int> perms) {
+  if (role == Role.admin) return null;
+  Map<String, int> clean(Map<String, int> m) => {for (final e in m.entries) if (e.value > 0) e.key: e.value};
+  final p = clean(perms);
+  return mapEquals(p, clean(defaultPerms(role))) ? null : p;
+}
+
+/// Rol y permisos de un usuario; al aprobar uno pendiente arranca como encargado.
+Future<void> showPermsSheet(BuildContext context, AppUser user) async {
+  var role = user.role == Role.pending ? Role.encargado : user.role;
+  var perms = {...(user.customPerms ?? defaultPerms(role))};
+  await showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheet) => StatefulBuilder(
+      builder: (sheet, setSheet) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(user.name, style: MM.display(26)),
+            Text(user.email, style: const TextStyle(color: MM.inkSoft)),
+            const SizedBox(height: 16),
+            PermsEditor(
+              role: role,
+              perms: perms,
+              onChanged: (r, p) => setSheet(() {
+                role = r;
+                perms = p;
+              }),
+            ),
+            const SizedBox(height: 20),
+            Row(children: [
+              if (role != Role.admin)
+                TextButton(
+                  onPressed: () => setSheet(() => perms = defaultPerms(role)),
+                  child: const Text('Volver a los del rol'),
+                ),
+              const Spacer(),
+              FilledButton(
+                onPressed: () async {
+                  Navigator.pop(sheet);
+                  final custom = customPerms(role, perms);
+                  await Repo.instance.updateUser(user.uid, role: role, perms: custom, resetPerms: custom == null);
+                },
+                child: Text(user.role == Role.pending ? 'Aprobar' : 'Guardar'),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Elige el rol (que carga sus permisos por defecto) y ajusta cada sección.
+class PermsEditor extends StatelessWidget {
+  const PermsEditor({super.key, required this.role, required this.perms, required this.onChanged});
+  final Role role;
+  final Map<String, int> perms;
+  final void Function(Role role, Map<String, int> perms) onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SegmentedButton<Role>(
+          segments: [for (final r in [Role.admin, Role.encargado, Role.staff]) ButtonSegment(value: r, label: Text(roleLabel(r)))],
+          selected: {role},
+          onSelectionChanged: (s) => onChanged(s.first, defaultPerms(s.first)),
+        ),
+        Padding(padding: const EdgeInsets.only(top: 8), child: Text(roleHelp(role), style: const TextStyle(color: MM.inkSoft))),
+        if (role != Role.admin) ...[
+          Padding(padding: const EdgeInsets.fromLTRB(2, 18, 2, 4), child: Text('QUÉ VE Y QUÉ PUEDE HACER', style: MM.label())),
+          for (final d in permDefs)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text(d.label, style: const TextStyle(fontWeight: FontWeight.w800)),
+                Text(d.help, style: const TextStyle(color: MM.inkSoft, fontSize: 12.5)),
+                const SizedBox(height: 6),
+                SegmentedButton<int>(
+                  showSelectedIcon: false,
+                  segments: [for (final e in d.levels.entries) ButtonSegment(value: e.key, label: Text(e.value))],
+                  selected: {perms[d.key] ?? 0},
+                  onSelectionChanged: (s) => onChanged(role, {...perms, d.key: s.first}),
+                ),
+              ]),
+            ),
+        ],
+      ]);
 }

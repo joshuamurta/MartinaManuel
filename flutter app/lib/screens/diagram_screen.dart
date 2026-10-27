@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../data/repo.dart';
+import '../main.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -31,6 +32,7 @@ class _DiagramScreenState extends State<DiagramScreen> {
       });
 
   void _tapNight(int cabin, DateTime day) {
+    if (!SessionScope.of(context).perms.canEdit('reservas')) return;
     final s = _start;
     if (s == null || s.cabin != cabin || day.isBefore(s.day)) {
       setState(() => _start = (cabin: cabin, day: day));
@@ -130,7 +132,7 @@ class _DiagramScreenState extends State<DiagramScreen> {
                   ]),
                 ),
                 const SizedBox(height: 14),
-                const ColorLegend(),
+                ColorLegend(money: SessionScope.of(context).perms.money),
                 ..._holidayList(settings, from, to),
               ],
             );

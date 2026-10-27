@@ -16,6 +16,12 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) => SettingsBuilder(
         builder: (context, s) => PageBody(maxWidth: 900, children: [
           const SectionHead(sticker: 'Ajustes', title: 'El complejo'),
+          StreamBuilder<bool>(
+            stream: Repo.instance.moneySplitDone(),
+            builder: (context, snap) => snap.data == false
+                ? const Padding(padding: EdgeInsets.only(bottom: 16), child: _MoneySplitCard())
+                : const SizedBox.shrink(),
+          ),
           _CabinsCard(settings: s),
           const SizedBox(height: 16),
           _GeneralCard(settings: s),
@@ -219,6 +225,54 @@ class _HolidaysCard extends StatelessWidget {
         checkInTime: s.checkInTime,
         checkOutTime: s.checkOutTime,
         breakfastPrice: s.breakfastPrice,
+      );
+}
+
+/// Una sola vez, después de actualizar la app: separa montos y costos para
+/// que los permisos los puedan ocultar.
+class _MoneySplitCard extends StatefulWidget {
+  const _MoneySplitCard();
+
+  @override
+  State<_MoneySplitCard> createState() => _MoneySplitCardState();
+}
+
+class _MoneySplitCardState extends State<_MoneySplitCard> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        color: MM.sand,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const _CardTitle(
+              'Separar montos (una sola vez)',
+              'Pasa los montos de las reservas y los costos de mantenimiento a un lugar aparte, para que encargados y staff no los vean. '
+                  'No se pierde nada. Hacelo antes de darle acceso a alguien que no sea administrador.',
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.icon(
+                icon: const Icon(Icons.lock_outline),
+                label: Text(_busy ? 'Separando…' : 'Separar ahora'),
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        setState(() => _busy = true);
+                        try {
+                          final n = await Repo.instance.splitMoney();
+                          if (context.mounted) toast(context, 'Listo: $n registros separados.');
+                        } catch (e) {
+                          if (context.mounted) toast(context, 'No se pudo: $e');
+                        } finally {
+                          if (mounted) setState(() => _busy = false);
+                        }
+                      },
+              ),
+            ),
+          ]),
+        ),
       );
 }
 

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/repo.dart';
+import '../main.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -127,6 +128,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
   @override
   Widget build(BuildContext context) {
     final r = _r;
+    final money = SessionScope.of(context).perms.editMoney;
     return Scaffold(
       appBar: AppBar(title: Text(widget.id == null ? 'Nueva reserva' : 'Editar reserva')),
       bottomNavigationBar: r == null
@@ -176,7 +178,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
                     for (final c in settings.cabins)
                       FilterChip(
                         avatar: Text('${c.id}', style: MM.display(14)),
-                        label: Text('${c.maxPeople}p${c.price != null ? ' · ${fmtMoney(c.price)}' : ''}'),
+                        label: Text('${c.maxPeople}p${money && c.price != null ? ' · ${fmtMoney(c.price)}' : ''}'),
                         selected: r.cabins.contains(c.id),
                         onSelected: (on) {
                           setState(() => r.cabins = on ? ([...r.cabins, c.id]..sort()) : r.cabins.where((x) => x != c.id).toList());
@@ -233,6 +235,8 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
                       FilterChip(label: const Text('Mascota'), selected: r.pets, onSelected: (v) => setState(() => r.pets = v)),
                       FilterChip(label: const Text('Cuna'), selected: r.crib, onSelected: (v) => setState(() => r.crib = v)),
                     ]),
+                  ],
+                  if (!r.isBlock && money) ...[
                     _section('Importe'),
                     _row([
                       TextFormField(

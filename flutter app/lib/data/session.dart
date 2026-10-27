@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../firebase_options.dart';
 import '../models.dart';
+import 'repo.dart';
 
 /// Quién está usando la app y con qué rol. El router escucha este objeto.
 class Session extends ChangeNotifier {
@@ -34,11 +35,13 @@ class Session extends ChangeNotifier {
   bool get signedIn => authUser != null;
   bool get isAdmin => profile?.isAdmin ?? false;
   bool get canWork => profile?.canWork ?? false;
+  Perms get perms => profile?.perms ?? Perms.none;
 
   Future<void> _onAuth(User? user) async {
     await _profileSub?.cancel();
     authUser = user;
     profile = null;
+    Repo.instance.perms = Perms.none;
     error = null;
     if (user == null) {
       loading = false;
@@ -51,6 +54,7 @@ class Session extends ChangeNotifier {
       await _ensureProfile(user);
       _profileSub = _db.doc('users/${user.uid}').snapshots().listen((d) {
         profile = d.exists ? AppUser.fromDoc(d) : null;
+        Repo.instance.perms = perms;
         loading = false;
         notifyListeners();
       });
@@ -80,7 +84,12 @@ class Session extends ChangeNotifier {
     if (invite != null && invite.exists) {
       final inv = invite.data()!;
       final batch = _db.batch()
-        ..set(ref, {...base, 'role': inv['role'] ?? 'user', if (inv['name'] != null) 'name': inv['name']})
+        ..set(ref, {
+          ...base,
+          'role': inv['role'] ?? Role.encargado.name,
+          if (inv['name'] != null) 'name': inv['name'],
+          if (inv['perms'] != null) 'perms': inv['perms'],
+        })
         ..delete(invite.reference);
       await batch.commit();
       return;

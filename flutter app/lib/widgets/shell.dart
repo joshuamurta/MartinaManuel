@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../main.dart';
+import '../router.dart';
 import '../theme.dart';
 
 class _Dest {
-  const _Dest(this.path, this.label, this.icon, {this.admin = false});
+  const _Dest(this.path, this.label, this.icon);
   final String path;
   final String label;
   final IconData icon;
-  final bool admin;
 }
 
 const _dests = [
@@ -17,10 +17,10 @@ const _dests = [
   _Dest('/diagrama', 'Diagrama', Icons.calendar_view_month_outlined),
   _Dest('/reservas', 'Reservas', Icons.event_note_outlined),
   _Dest('/mantenimiento', 'Mantenimiento', Icons.handyman_outlined),
-  _Dest('/caja', 'Caja', Icons.account_balance_wallet_outlined, admin: true),
-  _Dest('/numeros', 'Números', Icons.insights_outlined, admin: true),
-  _Dest('/usuarios', 'Usuarios', Icons.group_outlined, admin: true),
-  _Dest('/ajustes', 'Ajustes', Icons.tune_outlined, admin: true),
+  _Dest('/caja', 'Caja', Icons.account_balance_wallet_outlined),
+  _Dest('/numeros', 'Números', Icons.insights_outlined),
+  _Dest('/usuarios', 'Usuarios', Icons.group_outlined),
+  _Dest('/ajustes', 'Ajustes', Icons.tune_outlined),
 ];
 
 /// Navegación: barra inferior en el celular, riel lateral en pantallas anchas.
@@ -37,7 +37,7 @@ class AppShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = SessionScope.of(context);
-    final dests = _dests.where((d) => !d.admin || session.isAdmin).toList();
+    final dests = _dests.where((d) => canOpen(session, d.path)).toList();
     final wide = MediaQuery.sizeOf(context).width >= 900;
 
     if (wide) {

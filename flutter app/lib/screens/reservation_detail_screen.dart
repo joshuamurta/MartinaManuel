@@ -15,7 +15,7 @@ class ReservationDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final session = SessionScope.of(context);
+    final perms = SessionScope.of(context).perms;
     return SettingsBuilder(
       builder: (context, settings) => StreamView<Reservation?>(
         stream: Repo.instance.reservation(id),
@@ -30,15 +30,18 @@ class ReservationDetailScreen extends StatelessWidget {
               actions: [
                 if (!r.isBlock)
                   IconButton(tooltip: 'WhatsApp', icon: const Icon(Icons.chat_outlined), onPressed: () => showWhatsAppPicker(context, r, settings)),
-                IconButton(tooltip: 'Editar', icon: const Icon(Icons.edit_outlined), onPressed: () => context.push('/reservas/${r.id}/editar')),
-                PopupMenuButton<String>(
-                  onSelected: (v) => _menu(context, v, r),
-                  itemBuilder: (_) => [
-                    if (r.status != ResStatus.cancelada) const PopupMenuItem(value: 'cancel', child: Text('Cancelar reserva')),
-                    if (r.status == ResStatus.cancelada) const PopupMenuItem(value: 'restore', child: Text('Reactivar')),
-                    if (session.isAdmin) const PopupMenuItem(value: 'delete', child: Text('Eliminar', style: TextStyle(color: MM.canyon))),
-                  ],
-                ),
+                if (perms.canEdit('reservas')) ...[
+                  IconButton(tooltip: 'Editar', icon: const Icon(Icons.edit_outlined), onPressed: () => context.push('/reservas/${r.id}/editar')),
+                  PopupMenuButton<String>(
+                    onSelected: (v) => _menu(context, v, r),
+                    itemBuilder: (_) => [
+                      if (r.status != ResStatus.cancelada) const PopupMenuItem(value: 'cancel', child: Text('Cancelar reserva')),
+                      if (r.status == ResStatus.cancelada) const PopupMenuItem(value: 'restore', child: Text('Reactivar')),
+                      // Al eliminar se borran también los cobros de la caja: hace falta poder cobrar.
+                      if (perms.delete && perms.editMoney) const PopupMenuItem(value: 'delete', child: Text('Eliminar', style: TextStyle(color: MM.canyon))),
+                    ],
+                  ),
+                ],
               ],
             ),
             body: PageBody(maxWidth: 820, children: [
@@ -61,10 +64,9 @@ class ReservationDetailScreen extends StatelessWidget {
                 if (r.crib) const InfoChip('Cuna', icon: Icons.crib_outlined),
                 if (r.channel != null) InfoChip(channels[r.channel] ?? r.channel!, icon: Icons.campaign_outlined),
               ]),
-              if (r.warnings.isNotEmpty) ...[const SizedBox(height: 16), _Warnings(r: r)],
+              if (r.warnings.isNotEmpty) ...[const SizedBox(height: 16), _Warnings(r: r, canEdit: perms.canEdit('reservas'))],
               if (!r.isBlock) ...[
-                const SizedBox(height: 16),
-                _Money(r: r),
+                if (perms.money) ...[const SizedBox(height: 16), _Money(r: r, canEdit: perms.editMoney)],
                 const SizedBox(height: 16),
                 _Contact(r: r, settings: settings),
               ],
@@ -124,8 +126,9 @@ class ReservationDetailScreen extends StatelessWidget {
 }
 
 class _Warnings extends StatelessWidget {
-  const _Warnings({required this.r});
+  const _Warnings({required this.r, required this.canEdit});
   final Reservation r;
+  final bool canEdit;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -139,24 +142,27 @@ class _Warnings extends StatelessWidget {
           ]),
           const SizedBox(height: 8),
           for (final w in r.warnings) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text('• $w')),
-          const SizedBox(height: 6),
-          Wrap(spacing: 8, children: [
-            OutlinedButton(onPressed: () => context.push('/reservas/${r.id}/editar'), child: const Text('Corregir')),
-            FilledButton(
-              onPressed: () async {
-                r.warnings = [];
-                await Repo.instance.saveReservation(r);
-              },
-              child: const Text('Marcar revisada'),
-            ),
-          ]),
+          if (canEdit) ...[
+            const SizedBox(height: 6),
+            Wrap(spacing: 8, children: [
+              OutlinedButton(onPressed: () => context.push('/reservas/${r.id}/editar'), child: const Text('Corregir')),
+              FilledButton(
+                onPressed: () async {
+                  r.warnings = [];
+                  await Repo.instance.saveReservation(r);
+                },
+                child: const Text('Marcar revisada'),
+              ),
+            ]),
+          ],
         ]),
       );
 }
 
 class _Money extends StatelessWidget {
-  const _Money({required this.r});
+  const _Money({required this.r, required this.canEdit});
   final Reservation r;
+  final bool canEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -177,29 +183,31 @@ class _Money extends StatelessWidget {
             cell('Cobrado', fmtMoney(r.paid)),
             cell('Saldo', fmtMoney(bal), color: (bal ?? 0) > 0 ? MM.canyon : MM.forest),
           ]),
-          if (r.nightlyPrice != null || r.balanceUsd != null || r.invoiceNo != null) ...[
+          if (r.nightlyPrice != null || r.balanceUsd != null || r.invoiceNo != null || r.priceNote != null) ...[
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [
               if (r.nightlyPrice != null) InfoChip('${fmtMoney(r.nightlyPrice)} por noche'),
               if (r.balanceUsd != null) InfoChip('Saldo en dólares: u\$s ${r.balanceUsd}'),
               if (r.invoiceNo != null) InfoChip('Factura ${r.invoiceNo}${r.invoiceDate != null ? ' · ${fmtShort(parseYmd(r.invoiceDate!))}' : ''}', icon: Icons.receipt_long_outlined),
+              if (r.priceNote != null) InfoChip('Tarifa: ${r.priceNote}'),
             ]),
           ],
           const SizedBox(height: 14),
           Row(children: [
             Text('PAGOS', style: MM.label()),
             const Spacer(),
-            TextButton.icon(
-              onPressed: () async {
-                final p = await showPaymentDialog(context, suggested: bal != null && bal > 0 ? bal : null);
-                if (p == null) return;
-                r.payments = [...r.payments, p];
-                if (r.status == ResStatus.consulta) r.status = ResStatus.confirmada;
-                await Repo.instance.saveReservation(r);
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Registrar pago'),
-            ),
+            if (canEdit)
+              TextButton.icon(
+                onPressed: () async {
+                  final p = await showPaymentDialog(context, suggested: bal != null && bal > 0 ? bal : null);
+                  if (p == null) return;
+                  r.payments = [...r.payments, p];
+                  if (r.status == ResStatus.consulta) r.status = ResStatus.confirmada;
+                  await Repo.instance.saveReservation(r);
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Registrar pago'),
+              ),
           ]),
           if (r.payments.isEmpty) const Text('Todavía no hay pagos.', style: TextStyle(color: MM.inkSoft)),
           for (final p in r.payments)
@@ -213,18 +221,20 @@ class _Money extends StatelessWidget {
                 if (p.account != null) accounts[p.account] ?? p.account!,
                 if ((p.note ?? '').isNotEmpty) p.note!,
               ].join(' · ')),
-              trailing: IconButton(
-                tooltip: 'Quitar pago',
-                icon: const Icon(Icons.close, size: 18),
-                onPressed: () async {
-                  if (!await confirm(context, 'Quitar pago', 'Se quita el pago de ${fmtMoney(p.amount)}${p.account != null ? ' y su ingreso en la caja' : ''}.',
-                      ok: 'Quitar', danger: true)) {
-                    return;
-                  }
-                  r.payments = r.payments.where((x) => x.id != p.id).toList();
-                  await Repo.instance.saveReservation(r, removedPayments: [p]);
-                },
-              ),
+              trailing: !canEdit
+                  ? null
+                  : IconButton(
+                      tooltip: 'Quitar pago',
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () async {
+                        if (!await confirm(context, 'Quitar pago', 'Se quita el pago de ${fmtMoney(p.amount)}${p.account != null ? ' y su ingreso en la caja' : ''}.',
+                            ok: 'Quitar', danger: true)) {
+                          return;
+                        }
+                        r.payments = r.payments.where((x) => x.id != p.id).toList();
+                        await Repo.instance.saveReservation(r, removedPayments: [p]);
+                      },
+                    ),
             ),
         ]),
       ),

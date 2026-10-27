@@ -17,15 +17,29 @@ class HomeScreen extends StatelessWidget {
     final t = today();
     final ts = ymd(t);
     final first = (session.profile?.name ?? '').split(' ').first;
+    final perms = session.perms;
+    final head = SectionHead(sticker: fmtDay(t), title: first.isEmpty ? 'Hoy' : 'Hola, $first');
+
+    // Staff: sin reservas, sólo lo que tiene que hacer.
+    if (!perms.can('reservas')) {
+      return Scaffold(
+        body: PageBody(children: [
+          head,
+          if (perms.can('mantenimiento')) const _MaintenanceCard() else const Text('Todavía no tenés secciones asignadas. Pedile acceso a un administrador.'),
+        ]),
+      );
+    }
 
     return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/reservas/nueva'),
-        backgroundColor: MM.ink,
-        foregroundColor: MM.cream,
-        icon: const Icon(Icons.add),
-        label: const Text('Nueva reserva'),
-      ),
+      floatingActionButton: !perms.canEdit('reservas')
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => context.push('/reservas/nueva'),
+              backgroundColor: MM.ink,
+              foregroundColor: MM.cream,
+              icon: const Icon(Icons.add),
+              label: const Text('Nueva reserva'),
+            ),
       body: SettingsBuilder(
         builder: (context, settings) => StreamView<List<Reservation>>(
           stream: Repo.instance.upcoming(),
@@ -46,19 +60,20 @@ class HomeScreen extends StatelessWidget {
             final wide = MediaQuery.sizeOf(context).width >= 900;
 
             final cards = <Widget>[
-              _ListCard(title: 'Llegan hoy', icon: Icons.login, empty: 'Nadie llega hoy.', items: arrivals, settings: settings, showBalance: true),
+              _ListCard(title: 'Llegan hoy', icon: Icons.login, empty: 'Nadie llega hoy.', items: arrivals, settings: settings, showBalance: perms.money),
               _ListCard(title: 'Se van hoy', icon: Icons.logout, empty: 'Nadie se va hoy.', items: departures, settings: settings, cleaning: true),
               _ListCard(title: 'Próximos 7 días', icon: Icons.date_range, empty: 'Sin llegadas esta semana.', items: soon, settings: settings, showDate: true),
-              _ListCard(
-                title: 'Saldos a cobrar',
-                icon: Icons.payments_outlined,
-                empty: 'No hay saldos pendientes en los próximos 15 días.',
-                items: toCollect,
-                settings: settings,
-                showBalance: true,
-                showDate: true,
-                footer: toCollect.isEmpty ? null : 'Total: ${fmtMoney(toCollect.fold<num>(0, (a, r) => a + (r.balance ?? 0)))}',
-              ),
+              if (perms.money)
+                _ListCard(
+                  title: 'Saldos a cobrar',
+                  icon: Icons.payments_outlined,
+                  empty: 'No hay saldos pendientes en los próximos 15 días.',
+                  items: toCollect,
+                  settings: settings,
+                  showBalance: true,
+                  showDate: true,
+                  footer: toCollect.isEmpty ? null : 'Total: ${fmtMoney(toCollect.fold<num>(0, (a, r) => a + (r.balance ?? 0)))}',
+                ),
               if (inquiries.isNotEmpty)
                 _ListCard(title: 'Consultas sin seña', icon: Icons.hourglass_empty, empty: '', items: inquiries, settings: settings, showDate: true),
               if (review.isNotEmpty)
@@ -71,11 +86,11 @@ class HomeScreen extends StatelessWidget {
                   showDate: true,
                   footer: 'Estas reservas vinieron de la planilla con datos que no cierran. Abrilas, corregí y tocá "Marcar revisada".',
                 ),
-              const _MaintenanceCard(),
+              if (perms.can('mantenimiento')) const _MaintenanceCard(),
             ];
 
             return PageBody(children: [
-              SectionHead(sticker: fmtDay(t), title: first.isEmpty ? 'Hoy' : 'Hola, $first'),
+              head,
               Wrap(spacing: 10, runSpacing: 10, children: [
                 InfoChip('${occupiedCabins.length} de ${settings.cabins.length} cabañas ocupadas esta noche', icon: Icons.cottage_outlined, color: MM.sauce, fg: MM.forest),
                 InfoChip('${inHouse.fold<int>(0, (a, r) => a + (r.people ?? 0))} huéspedes', icon: Icons.people_outline),

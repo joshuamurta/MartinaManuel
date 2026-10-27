@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/repo.dart';
+import '../main.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -19,116 +20,121 @@ class _CashScreenState extends State<CashScreen> {
   String? _account;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: () => _edit(context, null),
-          backgroundColor: MM.ink,
-          foregroundColor: MM.cream,
-          icon: const Icon(Icons.add),
-          label: const Text('Movimiento'),
-        ),
-        body: StreamView<List<Movement>>(
-          stream: Repo.instance.movements(),
-          builder: (context, all) {
-            final balances = <String, num>{for (final k in accounts.keys) k: 0};
-            for (final m in all) {
-              balances[m.account] = (balances[m.account] ?? 0) + m.amount;
-            }
-            final prefix = ymd(_month).substring(0, 7);
-            final month = all.where((m) => m.date.startsWith(prefix) && (_account == null || m.account == _account)).toList();
-            final income = month.where((m) => m.isIncome).fold<num>(0, (a, m) => a + m.amount);
-            final expense = month.where((m) => !m.isIncome).fold<num>(0, (a, m) => a - m.amount);
-            final byCategory = <String, num>{};
-            for (final m in month.where((m) => !m.isIncome)) {
-              byCategory[m.category] = (byCategory[m.category] ?? 0) - m.amount;
-            }
-            final cats = byCategory.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+  Widget build(BuildContext context) {
+    final canEdit = SessionScope.of(context).perms.canEdit('caja');
+    return Scaffold(
+      floatingActionButton: !canEdit
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => _edit(context, null),
+              backgroundColor: MM.ink,
+              foregroundColor: MM.cream,
+              icon: const Icon(Icons.add),
+              label: const Text('Movimiento'),
+            ),
+      body: StreamView<List<Movement>>(
+        stream: Repo.instance.movements(),
+        builder: (context, all) {
+          final balances = <String, num>{for (final k in accounts.keys) k: 0};
+          for (final m in all) {
+            balances[m.account] = (balances[m.account] ?? 0) + m.amount;
+          }
+          final prefix = ymd(_month).substring(0, 7);
+          final month = all.where((m) => m.date.startsWith(prefix) && (_account == null || m.account == _account)).toList();
+          final income = month.where((m) => m.isIncome).fold<num>(0, (a, m) => a + m.amount);
+          final expense = month.where((m) => !m.isIncome).fold<num>(0, (a, m) => a - m.amount);
+          final byCategory = <String, num>{};
+          for (final m in month.where((m) => !m.isIncome)) {
+            byCategory[m.category] = (byCategory[m.category] ?? 0) - m.amount;
+          }
+          final cats = byCategory.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
-            return PageBody(children: [
-              const SectionHead(sticker: 'Caja', title: 'Cuentas y gastos'),
-              SizedBox(
-                height: 92,
-                child: ListView(scrollDirection: Axis.horizontal, children: [
-                  for (final e in accounts.entries)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 10),
-                      child: _AccountCard(
-                        label: e.value,
-                        value: balances[e.key] ?? 0,
-                        usd: e.key == 'usd',
-                        selected: _account == e.key,
-                        onTap: () => setState(() => _account = _account == e.key ? null : e.key),
-                      ),
+          return PageBody(children: [
+            const SectionHead(sticker: 'Caja', title: 'Cuentas y gastos'),
+            SizedBox(
+              height: 92,
+              child: ListView(scrollDirection: Axis.horizontal, children: [
+                for (final e in accounts.entries)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: _AccountCard(
+                      label: e.value,
+                      value: balances[e.key] ?? 0,
+                      usd: e.key == 'usd',
+                      selected: _account == e.key,
+                      onTap: () => setState(() => _account = _account == e.key ? null : e.key),
                     ),
-                ]),
-              ),
-              const SizedBox(height: 16),
-              Row(children: [
-                IconButton.filledTonal(onPressed: () => setState(() => _month = DateTime(_month.year, _month.month - 1)), icon: const Icon(Icons.arrow_back)),
-                Expanded(child: Center(child: Text(fmtMonth(_month), style: MM.display(22)))),
-                IconButton.filledTonal(onPressed: () => setState(() => _month = DateTime(_month.year, _month.month + 1)), icon: const Icon(Icons.arrow_forward)),
+                  ),
               ]),
-              const SizedBox(height: 12),
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                InfoChip('Ingresos ${fmtMoney(income)}', icon: Icons.arrow_downward, color: MM.sauce, fg: MM.forest),
-                InfoChip('Egresos ${fmtMoney(expense)}', icon: Icons.arrow_upward, color: MM.sand, fg: MM.canyon),
-                InfoChip('Resultado ${fmtMoney(income - expense)}'),
-                if (_account != null) InfoChip('Sólo ${accounts[_account]}', icon: Icons.filter_alt_outlined),
-              ]),
-              if (cats.isNotEmpty) ...[
-                Padding(padding: const EdgeInsets.fromLTRB(4, 22, 4, 8), child: Text('GASTOS DEL MES POR RUBRO', style: MM.label())),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(children: [
-                      for (final c in cats)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 5),
-                          child: Row(children: [
-                            SizedBox(width: 170, child: Text(c.key, style: const TextStyle(fontWeight: FontWeight.w600))),
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(99),
-                                child: LinearProgressIndicator(
-                                  value: c.value / cats.first.value,
-                                  minHeight: 10,
-                                  backgroundColor: MM.cream,
-                                  color: MM.canyon.withValues(alpha: .7),
-                                ),
+            ),
+            const SizedBox(height: 16),
+            Row(children: [
+              IconButton.filledTonal(onPressed: () => setState(() => _month = DateTime(_month.year, _month.month - 1)), icon: const Icon(Icons.arrow_back)),
+              Expanded(child: Center(child: Text(fmtMonth(_month), style: MM.display(22)))),
+              IconButton.filledTonal(onPressed: () => setState(() => _month = DateTime(_month.year, _month.month + 1)), icon: const Icon(Icons.arrow_forward)),
+            ]),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              InfoChip('Ingresos ${fmtMoney(income)}', icon: Icons.arrow_downward, color: MM.sauce, fg: MM.forest),
+              InfoChip('Egresos ${fmtMoney(expense)}', icon: Icons.arrow_upward, color: MM.sand, fg: MM.canyon),
+              InfoChip('Resultado ${fmtMoney(income - expense)}'),
+              if (_account != null) InfoChip('Sólo ${accounts[_account]}', icon: Icons.filter_alt_outlined),
+            ]),
+            if (cats.isNotEmpty) ...[
+              Padding(padding: const EdgeInsets.fromLTRB(4, 22, 4, 8), child: Text('GASTOS DEL MES POR RUBRO', style: MM.label())),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(children: [
+                    for (final c in cats)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Row(children: [
+                          SizedBox(width: 170, child: Text(c.key, style: const TextStyle(fontWeight: FontWeight.w600))),
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(99),
+                              child: LinearProgressIndicator(
+                                value: c.value / cats.first.value,
+                                minHeight: 10,
+                                backgroundColor: MM.cream,
+                                color: MM.canyon.withValues(alpha: .7),
                               ),
                             ),
-                            SizedBox(width: 120, child: Text(fmtMoney(c.value), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700))),
-                          ]),
-                        ),
-                    ]),
-                  ),
-                ),
-              ],
-              Padding(padding: const EdgeInsets.fromLTRB(4, 22, 4, 8), child: Text('MOVIMIENTOS', style: MM.label())),
-              if (month.isEmpty)
-                const Padding(padding: EdgeInsets.all(24), child: Text('No hay movimientos este mes.'))
-              else
-                Card(
-                  child: Column(children: [
-                    for (final (i, m) in month.indexed) ...[
-                      if (i > 0) const Divider(height: 1),
-                      ListTile(
-                        onTap: () => _edit(context, m),
-                        leading: Icon(m.isIncome ? Icons.south_west : Icons.north_east, color: m.isIncome ? MM.forest : MM.canyon),
-                        title: Text(m.detail, style: const TextStyle(fontWeight: FontWeight.w700)),
-                        subtitle: Text('${fmtShort(parseYmd(m.date))} · ${accounts[m.account] ?? m.account} · ${m.category}'),
-                        trailing: Text(
-                          fmtMoney(m.amount),
-                          style: TextStyle(fontWeight: FontWeight.w800, color: m.isIncome ? MM.forest : MM.canyon),
-                        ),
+                          ),
+                          SizedBox(width: 120, child: Text(fmtMoney(c.value), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700))),
+                        ]),
                       ),
-                    ],
                   ]),
                 ),
-            ]);
-          },
-        ),
-      );
+              ),
+            ],
+            Padding(padding: const EdgeInsets.fromLTRB(4, 22, 4, 8), child: Text('MOVIMIENTOS', style: MM.label())),
+            if (month.isEmpty)
+              const Padding(padding: EdgeInsets.all(24), child: Text('No hay movimientos este mes.'))
+            else
+              Card(
+                child: Column(children: [
+                  for (final (i, m) in month.indexed) ...[
+                    if (i > 0) const Divider(height: 1),
+                    ListTile(
+                      onTap: canEdit ? () => _edit(context, m) : null,
+                      leading: Icon(m.isIncome ? Icons.south_west : Icons.north_east, color: m.isIncome ? MM.forest : MM.canyon),
+                      title: Text(m.detail, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text('${fmtShort(parseYmd(m.date))} · ${accounts[m.account] ?? m.account} · ${m.category}'),
+                      trailing: Text(
+                        fmtMoney(m.amount),
+                        style: TextStyle(fontWeight: FontWeight.w800, color: m.isIncome ? MM.forest : MM.canyon),
+                      ),
+                    ),
+                  ],
+                ]),
+              ),
+          ]);
+        },
+      ),
+    );
+  }
 
   Future<void> _edit(BuildContext context, Movement? existing) async {
     final m = existing ?? Movement(date: ymd(today()), detail: '', amount: 0, account: _account ?? 'caja', category: 'Otros');
