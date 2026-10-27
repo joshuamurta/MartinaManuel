@@ -6,6 +6,7 @@ import '../main.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'purchases_screen.dart';
 
 /// Lo que hay que resolver hoy: quién llega, quién se va, qué falta cobrar.
 class HomeScreen extends StatelessWidget {
@@ -22,10 +23,35 @@ class HomeScreen extends StatelessWidget {
 
     // Staff: sin reservas, sólo lo que tiene que hacer.
     if (!perms.can('reservas')) {
+      final links = [
+        if (perms.can('limpieza')) ('/limpieza', 'Cabañas para preparar', Icons.cleaning_services_outlined),
+        if (perms.can('mantenimiento')) ('/mantenimiento', 'Mis tareas de mantenimiento', Icons.handyman_outlined),
+        if (perms.can('compras')) ('/compras', 'Mis pedidos de compra', Icons.shopping_cart_outlined),
+      ];
       return Scaffold(
-        body: PageBody(children: [
+        floatingActionButton: !perms.can('compras')
+            ? null
+            : FloatingActionButton.extended(
+                onPressed: () => requestPurchase(context),
+                backgroundColor: MM.ink,
+                foregroundColor: MM.cream,
+                icon: const Icon(Icons.add_shopping_cart),
+                label: const Text('Pedir algo'),
+              ),
+        body: PageBody(maxWidth: 900, children: [
           head,
-          if (perms.can('mantenimiento')) const _MaintenanceCard() else const Text('Todavía no tenés secciones asignadas. Pedile acceso a un administrador.'),
+          const _AlertsCard(staff: true),
+          const SizedBox(height: 14),
+          if (links.isEmpty) const Text('Todavía no tenés secciones asignadas. Pedile acceso a un administrador.'),
+          for (final (path, label, icon) in links)
+            Card(
+              child: ListTile(
+                leading: Icon(icon, color: MM.rioDeep),
+                title: Text(label, style: MM.display(18)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.go(path),
+              ),
+            ),
         ]),
       );
     }
@@ -91,6 +117,8 @@ class HomeScreen extends StatelessWidget {
 
             return PageBody(children: [
               head,
+              const _AlertsCard(),
+              const SizedBox(height: 14),
               Wrap(spacing: 10, runSpacing: 10, children: [
                 InfoChip('${occupiedCabins.length} de ${settings.cabins.length} cabañas ocupadas esta noche', icon: Icons.cottage_outlined, color: MM.sauce, fg: MM.forest),
                 InfoChip('${inHouse.fold<int>(0, (a, r) => a + (r.people ?? 0))} huéspedes', icon: Icons.people_outline),
@@ -288,4 +316,43 @@ class _MaintenanceCard extends StatelessWidget {
           );
         },
       );
+}
+
+/// Lo que hay que resolver hoy según los permisos de cada uno (ver Alerts).
+class _AlertsCard extends StatelessWidget {
+  const _AlertsCard({this.staff = false});
+  final bool staff;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = AlertsScope.of(context).items;
+    if (items.isEmpty && !staff) return const SizedBox.shrink();
+    return Card(
+      color: items.isEmpty ? null : MM.sand,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 10, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.notifications_active_outlined, color: MM.canyon),
+            const SizedBox(width: 10),
+            Expanded(child: Text('Avisos', style: MM.display(20))),
+            if (items.isNotEmpty) InfoChip('${items.length}'),
+            const SizedBox(width: 8),
+          ]),
+          const SizedBox(height: 6),
+          if (items.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('Nada pendiente para hoy.', style: TextStyle(color: MM.inkSoft))),
+          for (final a in items.take(staff ? 30 : 10))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(a.icon, color: a.urgent ? MM.canyon : MM.rioDeep),
+              title: Text(a.text, style: TextStyle(fontWeight: a.urgent ? FontWeight.w800 : FontWeight.w600)),
+              onTap: () => a.route.startsWith('/reservas/') ? context.push(a.route) : context.go(a.route),
+            ),
+          if (items.length > (staff ? 30 : 10)) Text('y ${items.length - (staff ? 30 : 10)} más', style: const TextStyle(color: MM.inkSoft)),
+        ]),
+      ),
+    );
+  }
 }

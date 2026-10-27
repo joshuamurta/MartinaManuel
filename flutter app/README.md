@@ -11,10 +11,12 @@ App Flutter (web + Android) para manejar el complejo: reemplaza la planilla
 
 | Pantalla | Reemplaza | Quién |
 |---|---|---|
-| **Hoy**: quién llega, quién se va, cabañas ocupadas esta noche, saldos a cobrar, consultas sin seña, mantenimiento pendiente | WhatsApp / memoria | todos |
+| **Hoy**: avisos del día, quién llega, quién se va, cabañas ocupadas esta noche, saldos a cobrar, consultas sin seña, mantenimiento pendiente. El staff ve sólo sus avisos | WhatsApp / memoria | todos |
 | **Diagrama**: cabañas × noches del mes, con nombre y personas; tocar la primera y la última noche libre crea la reserva; feriados resaltados y % de ocupación | hoja `diagrama` | todos |
 | **Reservas**: búsqueda, ficha con pagos, saldo, factura, canal, desayuno/mascota/cuna, mensajes de WhatsApp listos (confirmación, pedir seña, recordatorio, pedir opinión) | hojas `desarrollo …` | todos |
-| **Mantenimiento**: historial por cabaña y por servicio (piscinas, jacuzzi, parque, fogón…), con costo, proveedor y estado | — (nuevo) | todos (el costo, según permisos) |
+| **Mantenimiento**: historial por cabaña y por servicio (piscinas, jacuzzi, parque, fogón…), con costo, proveedor y estado; tareas con responsable, fecha y repetición | — (nuevo) | todos (el costo, según permisos) |
+| **Limpieza**: salidas y llegadas de los próximos días con el armado de camas que se cargó en la reserva, cuna, mascota e indicaciones; la mucama marca cada cabaña lista | WhatsApp a las mucamas | encargado, staff de limpieza |
+| **Compras**: el personal pide lo que hace falta; quien gestiona lo marca comprado y el gasto entra a la caja | — (nuevo) | todos (pedir o gestionar, según permisos) |
 | **Caja**: saldos por cuenta (caja, Francés, Patagonia, MP Claudio, MP Euge, dólares), movimientos y gastos del mes por rubro. Los cobros de reservas entran solos | `CAJA`, `BANCO FRANCES`, `MERC. PAGO`, `GASTOS MENSUALES` | admin |
 | **Números**: ocupación y facturación por mes, noches por cabaña, de dónde vienen las reservas | columna de % del diagrama | admin |
 | **Usuarios**: alta (Google o usuario/contraseña), cambio de rol, desactivar, aprobar pedidos de acceso | — | admin |
@@ -23,7 +25,13 @@ App Flutter (web + Android) para manejar el complejo: reemplaza la planilla
 Roles:
 - **Administrador**: ve y hace todo, incluidos Usuarios y Ajustes.
 - **Encargado**: diagrama, reservas y mantenimiento, sin montos, costos, caja ni números.
-- **Staff**: sólo mantenimiento, sin costos.
+- **Staff**: sus tareas de mantenimiento o de limpieza (plantillas) y pedir compras, sin costos.
+
+**Avisos**: no hay notificaciones push (requieren el plan Blaze). Dentro de la
+app, "Hoy" lista lo que cada uno tiene que resolver (tareas vencidas, cabañas
+para preparar, pedidos de compra, reservas que llegan sin armado de camas), el
+menú muestra cuántos avisos hay y, con la app abierta, cada aviso nuevo
+aparece en un cartel.
 
 En **Usuarios** el admin ajusta a cada uno qué ve y qué puede hacer (no ve /
 ve / edita) en reservas, montos de reservas, mantenimiento, costos, caja,

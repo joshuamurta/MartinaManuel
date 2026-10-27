@@ -28,6 +28,7 @@ class Session extends ChangeNotifier {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _profileSub;
 
   bool loading = true;
+  bool _published = false;
   User? authUser;
   AppUser? profile;
   String? error;
@@ -41,7 +42,9 @@ class Session extends ChangeNotifier {
     await _profileSub?.cancel();
     authUser = user;
     profile = null;
-    Repo.instance.perms = Perms.none;
+    Repo.instance
+      ..perms = Perms.none
+      ..me = null;
     error = null;
     if (user == null) {
       loading = false;
@@ -54,7 +57,15 @@ class Session extends ChangeNotifier {
       await _ensureProfile(user);
       _profileSub = _db.doc('users/${user.uid}').snapshots().listen((d) {
         profile = d.exists ? AppUser.fromDoc(d) : null;
-        Repo.instance.perms = perms;
+        Repo.instance
+          ..perms = perms
+          ..me = profile;
+        // Al entrar se rearma el cronograma de limpieza: si nadie guardó
+        // reservas en unos días, la ventana publicada quedaría atrasada.
+        if (!_published && perms.canEdit('reservas')) {
+          _published = true;
+          Repo.instance.publishAvailability().catchError((_) {});
+        }
         loading = false;
         notifyListeners();
       });

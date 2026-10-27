@@ -2,10 +2,12 @@ import 'package:go_router/go_router.dart';
 
 import 'data/session.dart';
 import 'screens/cash_screen.dart';
+import 'screens/cleaning_screen.dart';
 import 'screens/diagram_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/maintenance_screen.dart';
+import 'screens/purchases_screen.dart';
 import 'screens/reports_screen.dart';
 import 'screens/reservation_detail_screen.dart';
 import 'screens/reservation_form_screen.dart';
@@ -19,6 +21,8 @@ const _sections = {
   '/diagrama': 'reservas',
   '/reservas': 'reservas',
   '/mantenimiento': 'mantenimiento',
+  '/limpieza': 'limpieza',
+  '/compras': 'compras',
   '/caja': 'caja',
   '/numeros': 'numeros',
   '/usuarios': 'admin',
@@ -80,6 +84,8 @@ GoRouter buildRouter(Session session) => GoRouter(
               ],
             ),
             GoRoute(path: '/mantenimiento', pageBuilder: (_, _) => const NoTransitionPage(child: MaintenanceScreen())),
+            GoRoute(path: '/limpieza', pageBuilder: (_, _) => const NoTransitionPage(child: CleaningScreen())),
+            GoRoute(path: '/compras', pageBuilder: (_, _) => const NoTransitionPage(child: PurchasesScreen())),
             GoRoute(path: '/caja', pageBuilder: (_, _) => const NoTransitionPage(child: CashScreen())),
             GoRoute(path: '/numeros', pageBuilder: (_, _) => const NoTransitionPage(child: ReportsScreen())),
             GoRoute(path: '/usuarios', pageBuilder: (_, _) => const NoTransitionPage(child: UsersScreen())),

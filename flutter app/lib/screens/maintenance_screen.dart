@@ -6,8 +6,10 @@ import '../main.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'purchases_screen.dart';
 
-/// Historial de arreglos por cabaña y por servicio (piletas, jacuzzi, parque…).
+/// Historial de arreglos por cabaña y por servicio (piletas, jacuzzi, parque…),
+/// y tareas con responsable y fecha.
 class MaintenanceScreen extends StatefulWidget {
   const MaintenanceScreen({super.key});
 
@@ -17,13 +19,17 @@ class MaintenanceScreen extends StatefulWidget {
 
 class _MaintenanceScreenState extends State<MaintenanceScreen> {
   String? _area; // null = todo
+  bool? _mine; // null = según el rol: el staff arranca viendo sólo lo suyo
 
   List<String> get _areas => [for (final c in defaultCabins) 'cabin-${c.id}', ...maintenanceAreas.keys];
 
   @override
   Widget build(BuildContext context) {
-    final perms = SessionScope.of(context).perms;
+    final session = SessionScope.of(context);
+    final perms = session.perms;
     final canEdit = perms.canEdit('mantenimiento');
+    final mine = _mine ?? !perms.can('reservas');
+    final uid = session.profile?.uid;
     return Scaffold(
       floatingActionButton: !canEdit
           ? null
@@ -37,8 +43,10 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       body: StreamView<List<MaintenanceItem>>(
         stream: Repo.instance.maintenance(),
         builder: (context, all) {
-          final items = all.where((m) => _area == null || m.area == _area).toList();
-          final open = items.where((m) => m.status != MStatus.hecho).toList();
+          final items = all.where((m) => (_area == null || m.area == _area) && (!mine || m.isFor(uid))).toList();
+          // Primero lo que tiene fecha (lo más urgente arriba), después el resto.
+          final open = items.where((m) => m.isOpen).toList()
+            ..sort((a, b) => (a.dueDate ?? '9999').compareTo(b.dueDate ?? '9999'));
           final done = items.where((m) => m.status == MStatus.hecho).toList();
           final year = '${today().year}';
           final spent = done.where((m) => m.date.startsWith(year)).fold<num>(0, (a, m) => a + (m.cost ?? 0));
@@ -48,6 +56,15 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
             SizedBox(
               height: 40,
               child: ListView(scrollDirection: Axis.horizontal, children: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    avatar: const Icon(Icons.person_outline, size: 18),
+                    label: const Text('Mis tareas'),
+                    selected: mine,
+                    onSelected: (v) => setState(() => _mine = v),
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(label: const Text('Todo'), selected: _area == null, onSelected: (_) => setState(() => _area = null)),
@@ -97,17 +114,14 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                   m.status == MStatus.hecho ? Icons.check_circle : (m.status == MStatus.enCurso ? Icons.autorenew : Icons.radio_button_unchecked),
                   color: m.status == MStatus.hecho ? MM.forest : MM.canyon,
                 ),
-                onPressed: !canEdit
-                    ? null
-                    : () {
-                        m.status = m.status == MStatus.hecho ? MStatus.pendiente : MStatus.hecho;
-                        Repo.instance.saveMaintenance(m);
-                      },
+                onPressed: !canEdit ? null : () => Repo.instance.toggleMaintenance(m),
               ),
               title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w800)),
               subtitle: Text([
                 areaLabel(m.area),
-                fmtDay(parseYmd(m.date)),
+                if (m.isOpen && m.dueDate != null) _dueText(m.dueDate!) else fmtDay(parseYmd(m.date)),
+                if (m.assignedName != null) '→ ${m.assignedName}',
+                if (m.repeatDays != null) 'cada ${m.repeatDays} ${m.repeatDays == 1 ? 'día' : 'días'}',
                 if (m.kind != 'reparacion') m.kind == 'preventivo' ? 'Preventivo' : 'Mejora',
                 if ((m.provider ?? '').isNotEmpty) m.provider!,
                 if ((m.description ?? '').isNotEmpty) m.description!,
@@ -120,12 +134,20 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     ]);
   }
 
+  static String _dueText(String due) {
+    final t = ymd(today());
+    if (due == t) return 'Para hoy';
+    if (due.compareTo(t) < 0) return 'Atrasada (${fmtShort(parseYmd(due))})';
+    return 'Para el ${fmtDay(parseYmd(due))}';
+  }
+
   Future<void> _edit(BuildContext context, MaintenanceItem m) async {
     final title = TextEditingController(text: m.title);
     final desc = TextEditingController(text: m.description ?? '');
     final cost = TextEditingController(text: m.cost?.round().toString() ?? '');
     final provider = TextEditingController(text: m.provider ?? '');
     final perms = SessionScope.of(context).perms;
+    final wasOpen = m.isOpen;
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -172,6 +194,44 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                 child: InputDecorator(decoration: const InputDecoration(labelText: 'Fecha'), child: Text(fmtDay(parseYmd(m.date)))),
               ),
               const SizedBox(height: 12),
+              _Assignee(m: m),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      final d = await showDatePicker(
+                          context: sheet, initialDate: m.dueDate == null ? today() : parseYmd(m.dueDate!), firstDate: DateTime(2024), lastDate: DateTime(2035));
+                      if (d != null) setSheet(() => m.dueDate = ymd(d));
+                    },
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'Para cuándo',
+                        suffixIcon: m.dueDate == null
+                            ? null
+                            : IconButton(tooltip: 'Sin fecha', icon: const Icon(Icons.close), onPressed: () => setSheet(() => m.dueDate = null)),
+                      ),
+                      child: Text(m.dueDate == null ? 'Sin fecha' : fmtDay(parseYmd(m.dueDate!))),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<int?>(
+                    initialValue: const [1, 2, 3, 7, 15, 30].contains(m.repeatDays) ? m.repeatDays : null,
+                    decoration: const InputDecoration(labelText: 'Se repite'),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('No')),
+                      for (final d in const [1, 2, 3, 7, 15, 30]) DropdownMenuItem(value: d, child: Text(d == 1 ? 'Todos los días' : 'Cada $d días')),
+                    ],
+                    onChanged: (v) => setSheet(() {
+                      m.repeatDays = v;
+                      if (v != null) m.dueDate ??= ymd(today());
+                    }),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 for (final k in const {'reparacion': 'Reparación', 'preventivo': 'Preventivo / service', 'mejora': 'Mejora'}.entries)
                   ChoiceChip(label: Text(k.value), selected: m.kind == k.key, onSelected: (_) => setSheet(() => m.kind = k.key)),
@@ -191,6 +251,15 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                     },
                     child: const Text('Eliminar', style: TextStyle(color: MM.canyon)),
                   ),
+                if (m.id != null && perms.can('compras'))
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(sheet);
+                      requestPurchase(context, forItem: m);
+                    },
+                    icon: const Icon(Icons.add_shopping_cart),
+                    label: const Text('Pedir material'),
+                  ),
                 const Spacer(),
                 FilledButton(
                   onPressed: () async {
@@ -201,7 +270,13 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                       ..cost = perms.editCosts ? num.tryParse(cost.text) : m.cost
                       ..provider = provider.text.trim();
                     Navigator.pop(sheet);
-                    await Repo.instance.saveMaintenance(m);
+                    if (wasOpen && !m.isOpen && m.repeatDays != null) {
+                      // Terminada desde acá: igual que con el círculo, si se repite queda la próxima.
+                      m.status = MStatus.pendiente;
+                      await Repo.instance.toggleMaintenance(m);
+                    } else {
+                      await Repo.instance.saveMaintenance(m);
+                    }
                   },
                   child: const Text('Guardar'),
                 ),
@@ -212,4 +287,42 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       ),
     );
   }
+}
+
+/// A quién le toca. Lista a quienes pueden editar mantenimiento.
+class _Assignee extends StatefulWidget {
+  const _Assignee({required this.m});
+  final MaintenanceItem m;
+
+  @override
+  State<_Assignee> createState() => _AssigneeState();
+}
+
+class _AssigneeState extends State<_Assignee> {
+  late final _users = Repo.instance.users();
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<List<AppUser>>(
+        stream: _users,
+        builder: (context, snap) {
+          final m = widget.m;
+          final people = (snap.data ?? []).where((u) => u.active && u.perms.canEdit('mantenimiento')).toList();
+          if (m.assignedTo != null && !people.any((u) => u.uid == m.assignedTo)) {
+            people.add(AppUser(uid: m.assignedTo!, email: '', name: m.assignedName ?? '?', role: Role.staff, active: true));
+          }
+          return DropdownButtonFormField<String?>(
+            key: ValueKey(people.length),
+            initialValue: m.assignedTo,
+            decoration: const InputDecoration(labelText: 'Quién lo tiene que hacer'),
+            items: [
+              const DropdownMenuItem(value: null, child: Text('Cualquiera')),
+              for (final u in people) DropdownMenuItem(value: u.uid, child: Text(u.name)),
+            ],
+            onChanged: (v) {
+              m.assignedTo = v;
+              m.assignedName = people.where((u) => u.uid == v).firstOrNull?.name;
+            },
+          );
+        },
+      );
 }

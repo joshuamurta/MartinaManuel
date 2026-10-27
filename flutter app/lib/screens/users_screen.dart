@@ -31,8 +31,8 @@ class UsersScreen extends StatelessWidget {
           return PageBody(maxWidth: 900, children: [
             const SectionHead(sticker: 'Usuarios', title: 'Quién usa la app'),
             const Text(
-              'Administrador: ve y hace todo. Encargado: diagrama, reservas y mantenimiento, sin montos ni caja. '
-              'Staff: sólo mantenimiento, sin costos. Tocá un usuario para ajustar qué ve y qué puede hacer.',
+              'Administrador: ve y hace todo. Encargado: diagrama, reservas, mantenimiento, limpieza y compras, sin montos ni caja. '
+              'Staff: sus tareas de mantenimiento o de limpieza y pedir compras. Tocá un usuario para ajustar qué ve y qué puede hacer.',
               style: TextStyle(color: MM.inkSoft),
             ),
             if (pending.isNotEmpty) ...[
@@ -110,7 +110,8 @@ class _UserTile extends StatelessWidget {
         subtitle: Text([
           user.email,
           user.provider == 'google.com' ? 'Google' : 'usuario y contraseña',
-          if (user.customPerms != null && user.role != Role.admin) 'permisos a medida',
+          if (user.customPerms != null && user.role != Role.admin)
+            staffTemplates.entries.where((e) => user.role == Role.staff && mapEquals(e.value, user.customPerms)).firstOrNull?.key ?? 'permisos a medida',
           if (!user.active) 'desactivado',
         ].join(' · ')),
         trailing: isMe
@@ -327,6 +328,18 @@ class PermsEditor extends StatelessWidget {
           onSelectionChanged: (s) => onChanged(s.first, defaultPerms(s.first)),
         ),
         Padding(padding: const EdgeInsets.only(top: 8), child: Text(roleHelp(role), style: const TextStyle(color: MM.inkSoft))),
+        if (role == Role.staff)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final e in staffTemplates.entries)
+                ChoiceChip(
+                  label: Text(e.key),
+                  selected: mapEquals({for (final p in perms.entries) if (p.value > 0) p.key: p.value}, e.value),
+                  onSelected: (_) => onChanged(role, {...e.value}),
+                ),
+            ]),
+          ),
         if (role != Role.admin) ...[
           Padding(padding: const EdgeInsets.fromLTRB(2, 18, 2, 4), child: Text('QUÉ VE Y QUÉ PUEDE HACER', style: MM.label())),
           for (final d in permDefs)

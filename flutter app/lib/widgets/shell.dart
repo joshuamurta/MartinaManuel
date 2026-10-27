@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/alerts.dart';
 import '../main.dart';
 import '../router.dart';
 import '../theme.dart';
@@ -17,6 +20,8 @@ const _dests = [
   _Dest('/diagrama', 'Diagrama', Icons.calendar_view_month_outlined),
   _Dest('/reservas', 'Reservas', Icons.event_note_outlined),
   _Dest('/mantenimiento', 'Mantenimiento', Icons.handyman_outlined),
+  _Dest('/limpieza', 'Limpieza', Icons.cleaning_services_outlined),
+  _Dest('/compras', 'Compras', Icons.shopping_cart_outlined),
   _Dest('/caja', 'Caja', Icons.account_balance_wallet_outlined),
   _Dest('/numeros', 'Números', Icons.insights_outlined),
   _Dest('/usuarios', 'Usuarios', Icons.group_outlined),
@@ -39,6 +44,9 @@ class AppShell extends StatelessWidget {
     final session = SessionScope.of(context);
     final dests = _dests.where((d) => canOpen(session, d.path)).toList();
     final wide = MediaQuery.sizeOf(context).width >= 900;
+    final alerts = AlertsScope.of(context).items.length;
+    // El número de avisos va sobre "Hoy", donde se listan.
+    Widget icon(_Dest d) => d.path == '/' && alerts > 0 ? Badge.count(count: alerts, child: Icon(d.icon)) : Icon(d.icon);
 
     if (wide) {
       return Scaffold(
@@ -64,10 +72,10 @@ class AppShell extends StatelessWidget {
               ),
             ),
             destinations: [
-              for (final d in dests) NavigationRailDestination(icon: Icon(d.icon), label: Text(d.label)),
+              for (final d in dests) NavigationRailDestination(icon: icon(d), label: Text(d.label)),
             ],
           ),
-          Expanded(child: child),
+          Expanded(child: _AlertToasts(child: child)),
         ]),
       );
     }
@@ -76,7 +84,7 @@ class AppShell extends StatelessWidget {
     const main = 4;
     final idx = _indexOf(dests);
     return Scaffold(
-      body: child,
+      body: _AlertToasts(child: child),
       bottomNavigationBar: NavigationBar(
         selectedIndex: idx < main ? idx : main,
         onDestinationSelected: (i) {
@@ -87,7 +95,7 @@ class AppShell extends StatelessWidget {
           }
         },
         destinations: [
-          for (final d in dests.take(main)) NavigationDestination(icon: Icon(d.icon), label: d.label),
+          for (final d in dests.take(main)) NavigationDestination(icon: icon(d), label: d.label),
           const NavigationDestination(icon: Icon(Icons.more_horiz), label: 'Más'),
         ],
       ),
@@ -142,4 +150,41 @@ class _AccountButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Con la app abierta, cada aviso nuevo (un pedido, una tarea para hoy…)
+/// aparece en un cartel abajo.
+class _AlertToasts extends StatefulWidget {
+  const _AlertToasts({required this.child});
+  final Widget child;
+
+  @override
+  State<_AlertToasts> createState() => _AlertToastsState();
+}
+
+class _AlertToastsState extends State<_AlertToasts> {
+  StreamSubscription<Alert>? _sub;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Sin depender de AlertsScope: si no, se volvería a suscribir con cada cambio.
+    _sub ??= context.getInheritedWidgetOfExactType<AlertsScope>()!.notifier!.news.listen((a) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(children: [Icon(a.icon, color: MM.cream), const SizedBox(width: 10), Expanded(child: Text(a.text))]),
+        action: SnackBarAction(label: 'Ver', onPressed: () => context.go(a.route)),
+        duration: const Duration(seconds: 6),
+      ));
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

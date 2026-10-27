@@ -41,8 +41,8 @@ String roleLabel(Role r) => switch (r) {
 
 String roleHelp(Role r) => switch (r) {
       Role.admin => 'Ve y hace todo, incluidos usuarios y ajustes.',
-      Role.encargado => 'Diagrama, reservas y mantenimiento, sin montos ni caja.',
-      Role.staff => 'Sólo sus tareas de mantenimiento, sin costos.',
+      Role.encargado => 'Diagrama, reservas, mantenimiento, limpieza y compras, sin montos ni caja.',
+      Role.staff => 'Sólo sus tareas (mantenimiento o limpieza) y pedir compras, sin costos.',
       Role.pending => 'Sin acceso.',
     };
 
@@ -62,6 +62,8 @@ const permDefs = [
   PermDef('montos', 'Montos de reservas', 'Total, pagos, saldo y factura', {0: 'No ve', 1: 'Ve', 2: 'Cobra'}),
   PermDef('mantenimiento', 'Mantenimiento', 'Arreglos e historial', {0: 'No ve', 1: 'Ve', 2: 'Edita'}),
   PermDef('costos', 'Costos de mantenimiento', 'Cuánto salió cada arreglo', {0: 'No ve', 1: 'Ve', 2: 'Edita'}),
+  PermDef('limpieza', 'Limpieza', 'Salidas, llegadas, armado de camas e indicaciones', {0: 'No ve', 1: 'Ve', 2: 'Edita'}),
+  PermDef('compras', 'Compras', 'Pedidos de insumos y materiales', {0: 'No ve', 1: 'Pide', 2: 'Gestiona'}),
   PermDef('caja', 'Caja', 'Saldos, movimientos y gastos', {0: 'No ve', 1: 'Ve', 2: 'Edita'}),
   PermDef('numeros', 'Números', 'Ocupación y facturación', {0: 'No ve', 1: 'Ve'}),
   PermDef('eliminar', 'Eliminar', 'Borrar reservas y arreglos', {0: 'No', 2: 'Sí'}),
@@ -70,10 +72,16 @@ const permDefs = [
 /// Permisos de cada rol mientras el admin no los cambie.
 Map<String, int> defaultPerms(Role r) => switch (r) {
       Role.admin => {for (final d in permDefs) d.key: d.levels.keys.last},
-      Role.encargado => {'reservas': 2, 'mantenimiento': 2},
-      Role.staff => {'mantenimiento': 2},
+      Role.encargado => {'reservas': 2, 'mantenimiento': 2, 'limpieza': 2, 'compras': 2},
+      Role.staff => staffTemplates.values.first,
       Role.pending => {},
     };
+
+/// Puntos de partida para el staff: el de mantenimiento o la mucama.
+const staffTemplates = {
+  'Mantenimiento': {'mantenimiento': 2, 'compras': 1},
+  'Limpieza': {'limpieza': 2, 'compras': 1},
+};
 
 class Perms {
   const Perms(this.levels, {this.admin = false});
@@ -124,35 +132,79 @@ class AppUser {
 // ---------- Cabañas ----------
 
 class Cabin {
-  const Cabin({required this.id, required this.name, required this.capacity, required this.maxPeople, required this.size, this.price});
+  const Cabin({
+    required this.id,
+    required this.name,
+    required this.capacity,
+    required this.maxPeople,
+    required this.size,
+    this.price,
+    this.singles = 0,
+    this.fixedDoubles = 0,
+    this.joinable = 0,
+  });
   final int id;
   final String name;
   final String capacity;
   final int maxPeople;
   final int size;
   final num? price; // tarifa por noche vigente
+  final int singles; // camas de una plaza
+  final int fixedDoubles; // matrimoniales que no se separan
+  final int joinable; // cuántas matrimoniales se pueden armar juntando dos simples
+
+  bool get hasBedOptions => joinable > 0;
+
+  /// Camas con [joined] matrimoniales armadas: "1 matrimonial + 3 simples".
+  String bedsLabel(int joined) {
+    final doubles = fixedDoubles + joined;
+    final single = singles - 2 * joined;
+    return [
+      if (doubles > 0) '$doubles ${doubles == 1 ? 'matrimonial' : 'matrimoniales'}',
+      if (single > 0) '$single ${single == 1 ? 'simple' : 'simples'}',
+    ].join(' + ');
+  }
 
   Map<String, dynamic> toMap() => {'id': id, 'name': name, 'capacity': capacity, 'maxPeople': maxPeople, 'size': size, 'price': price};
-  factory Cabin.fromMap(Map<String, dynamic> m) => Cabin(
-        id: m['id'],
-        name: m['name'],
-        capacity: m['capacity'] ?? '',
-        maxPeople: m['maxPeople'] ?? 2,
-        size: m['size'] ?? 0,
-        price: m['price'],
-      );
 
-  Cabin copyWith({num? price}) => Cabin(id: id, name: name, capacity: capacity, maxPeople: maxPeople, size: size, price: price ?? this.price);
+  /// Las camas no se editan en Ajustes: salen siempre de [defaultCabins].
+  factory Cabin.fromMap(Map<String, dynamic> m) {
+    final base = defaultCabins.where((c) => c.id == m['id']).firstOrNull;
+    return Cabin(
+      id: m['id'],
+      name: m['name'],
+      capacity: m['capacity'] ?? '',
+      maxPeople: m['maxPeople'] ?? 2,
+      size: m['size'] ?? 0,
+      price: m['price'],
+      singles: base?.singles ?? 0,
+      fixedDoubles: base?.fixedDoubles ?? 0,
+      joinable: base?.joinable ?? 0,
+    );
+  }
+
+  Cabin copyWith({num? price}) => Cabin(
+        id: id,
+        name: name,
+        capacity: capacity,
+        maxPeople: maxPeople,
+        size: size,
+        price: price ?? this.price,
+        singles: singles,
+        fixedDoubles: fixedDoubles,
+        joinable: joinable,
+      );
 }
 
 /// Las mismas seis cabañas de web/js/data.js; las tarifas se cargan en Ajustes.
+/// Camas según Claudio (audio del 27/10/2026).
 const defaultCabins = [
-  Cabin(id: 1, name: 'Cabaña 1', capacity: '2 adultos + niño', maxPeople: 3, size: 35),
-  Cabin(id: 2, name: 'Cabaña 2', capacity: '3 a 4 personas', maxPeople: 4, size: 52),
-  Cabin(id: 3, name: 'Cabaña 3', capacity: 'hasta 5 personas', maxPeople: 5, size: 48),
-  Cabin(id: 4, name: 'Cabaña 4', capacity: 'hasta 5 personas', maxPeople: 5, size: 48),
-  Cabin(id: 5, name: 'Cabaña 5', capacity: '6 a 7 personas', maxPeople: 7, size: 78),
-  Cabin(id: 6, name: 'Cabaña 6', capacity: 'hasta 6 personas', maxPeople: 6, size: 65),
+  Cabin(id: 1, name: 'Cabaña 1', capacity: '2 adultos + niño', maxPeople: 3, size: 35, singles: 2, joinable: 1),
+  Cabin(id: 2, name: 'Cabaña 2', capacity: '3 a 4 personas', maxPeople: 4, size: 52, singles: 2, fixedDoubles: 1),
+  Cabin(id: 3, name: 'Cabaña 3', capacity: 'hasta 5 personas', maxPeople: 5, size: 48, singles: 5, joinable: 1),
+  Cabin(id: 4, name: 'Cabaña 4', capacity: 'hasta 5 personas', maxPeople: 5, size: 48, singles: 5, joinable: 1),
+  Cabin(id: 5, name: 'Cabaña 5', capacity: '6 a 7 personas', maxPeople: 7, size: 78, singles: 7, joinable: 2),
+  Cabin(id: 6, name: 'Cabaña 6', capacity: 'hasta 6 personas', maxPeople: 6, size: 65, singles: 6, joinable: 2),
 ];
 
 // ---------- Reservas ----------
@@ -227,6 +279,8 @@ class Reservation {
     this.warnings = const [],
     this.source,
     this.groupId,
+    this.beds = const {},
+    this.cleaningNote,
   });
 
   String? id;
@@ -254,6 +308,8 @@ class Reservation {
   List<String> warnings; // avisos de la importación para revisar
   String? source;
   String? groupId;
+  Map<int, int> beds; // cabaña → matrimoniales armadas; sin dato = sin definir
+  String? cleaningNote; // indicación para la mucama
 
   DateTime get inDate => parseYmd(checkIn);
   DateTime get outDate => parseYmd(checkOut);
@@ -316,6 +372,8 @@ class Reservation {
         'warnings': warnings,
         'source': source,
         'groupId': groupId,
+        'beds': {for (final e in beds.entries) '${e.key}': e.value},
+        'cleaningNote': cleaningNote,
       };
 
   factory Reservation.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) => Reservation.fromMap(d.data() ?? {}, id: d.id);
@@ -342,6 +400,8 @@ class Reservation {
         warnings: List<String>.from(m['warnings'] ?? const []),
         source: m['source'],
         groupId: m['groupId'],
+        beds: {for (final e in (m['beds'] as Map? ?? const {}).entries) int.parse('${e.key}'): (e.value as num).toInt()},
+        cleaningNote: m['cleaningNote'],
       );
 
   /// Fila del JSON generado por tools/importar_excel.py.
@@ -398,6 +458,10 @@ class MaintenanceItem {
     this.status = MStatus.pendiente,
     this.kind = 'reparacion',
     this.createdBy,
+    this.assignedTo,
+    this.assignedName,
+    this.dueDate,
+    this.repeatDays,
   });
   String? id;
   String area;
@@ -409,6 +473,14 @@ class MaintenanceItem {
   MStatus status;
   String kind; // reparacion | preventivo | mejora
   String? createdBy;
+  String? assignedTo; // uid de quien lo tiene que hacer; null = cualquiera
+  String? assignedName;
+  String? dueDate; // para cuándo
+  int? repeatDays; // al marcarla hecha se crea la próxima
+
+  bool get isOpen => status != MStatus.hecho;
+  bool dueBy(String day) => isOpen && dueDate != null && dueDate!.compareTo(day) <= 0;
+  bool isFor(String? uid) => assignedTo == null || assignedTo == uid;
 
   /// El costo va aparte, en maintenanceCosts/{id}, para que el staff no lo vea.
   Map<String, dynamic> toMap() => {
@@ -420,6 +492,10 @@ class MaintenanceItem {
         'status': status.name,
         'kind': kind,
         'createdBy': createdBy,
+        'assignedTo': assignedTo,
+        'assignedName': assignedName,
+        'dueDate': dueDate,
+        'repeatDays': repeatDays,
       };
 
   factory MaintenanceItem.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
@@ -435,6 +511,10 @@ class MaintenanceItem {
       status: MStatus.values.firstWhere((s) => s.name == m['status'], orElse: () => MStatus.pendiente),
       kind: m['kind'] ?? 'reparacion',
       createdBy: m['createdBy'],
+      assignedTo: m['assignedTo'],
+      assignedName: m['assignedName'],
+      dueDate: m['dueDate'],
+      repeatDays: (m['repeatDays'] as num?)?.toInt(),
     );
   }
 }
@@ -485,6 +565,7 @@ class Movement {
     required this.account,
     required this.category,
     this.reservationId,
+    this.purchaseId,
     this.createdBy,
   });
   String? id;
@@ -494,6 +575,7 @@ class Movement {
   String account;
   String category;
   String? reservationId;
+  String? purchaseId;
   String? createdBy;
 
   bool get isIncome => amount >= 0;
@@ -505,6 +587,7 @@ class Movement {
         'account': account,
         'category': category,
         'reservationId': reservationId,
+        'purchaseId': ?purchaseId,
         'createdBy': createdBy,
       };
 
@@ -518,7 +601,173 @@ class Movement {
       account: m['account'] ?? 'caja',
       category: m['category'] ?? 'Otros',
       reservationId: m['reservationId'],
+      purchaseId: m['purchaseId'],
       createdBy: m['createdBy'],
+    );
+  }
+}
+
+// ---------- Limpieza ----------
+
+/// Una salida o una llegada en una cabaña, sin datos del huésped. Se arma al
+/// guardar reservas y se publica en housekeeping/schedule para las mucamas.
+class CleaningEvent {
+  CleaningEvent({
+    required this.date,
+    required this.cabin,
+    required this.arrival,
+    this.people,
+    this.beds,
+    this.crib = false,
+    this.pets = false,
+    this.note,
+    this.nights,
+    this.tentative = false,
+  });
+  final String date;
+  final int cabin;
+  final bool arrival; // false = se van
+  final int? people;
+  final String? beds; // "1 matrimonial + 3 simples"; null = sin definir
+  final bool crib;
+  final bool pets;
+  final String? note;
+  final int? nights;
+  final bool tentative; // consulta sin seña
+
+  /// Id del documento en cleaning/ que marca si ya está hecho.
+  String get key => '${date}_${cabin}_${arrival ? 'in' : 'out'}';
+
+  Map<String, dynamic> toMap() => {
+        'd': date,
+        'c': cabin,
+        'a': arrival,
+        'p': ?people,
+        'b': ?beds,
+        if (crib) 'crib': true,
+        if (pets) 'pets': true,
+        'n': ?note,
+        'nights': ?nights,
+        if (tentative) 't': true,
+      };
+
+  factory CleaningEvent.fromMap(Map<String, dynamic> m) => CleaningEvent(
+        date: m['d'],
+        cabin: m['c'],
+        arrival: m['a'] ?? false,
+        people: m['p'],
+        beds: m['b'],
+        crib: m['crib'] ?? false,
+        pets: m['pets'] ?? false,
+        note: m['n'],
+        nights: m['nights'],
+        tentative: m['t'] ?? false,
+      );
+}
+
+/// Indicación suelta para las mucamas ("repasar vidrios de la 3").
+class CleaningTask {
+  CleaningTask({this.id, required this.date, required this.text, this.cabin, this.done = false, this.createdBy, this.createdName});
+  String? id;
+  String date;
+  String text;
+  int? cabin;
+  bool done;
+  String? createdBy;
+  String? createdName;
+
+  Map<String, dynamic> toMap() => {'date': date, 'text': text, 'cabin': cabin, 'done': done, 'createdBy': createdBy, 'createdName': createdName};
+
+  factory CleaningTask.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return CleaningTask(
+      id: d.id,
+      date: m['date'] ?? ymd(today()),
+      text: m['text'] ?? '',
+      cabin: (m['cabin'] as num?)?.toInt(),
+      done: m['done'] ?? false,
+      createdBy: m['createdBy'],
+      createdName: m['createdName'],
+    );
+  }
+}
+
+// ---------- Compras ----------
+
+enum PStatus { pedido, comprado, entregado, cancelado }
+
+String pStatusLabel(PStatus s) => switch (s) {
+      PStatus.pedido => 'Pedido',
+      PStatus.comprado => 'Comprado',
+      PStatus.entregado => 'Entregado',
+      PStatus.cancelado => 'Cancelado',
+    };
+
+/// Lo que el personal necesita comprar. El costo no se guarda acá: va a la
+/// caja como gasto (movements, con purchaseId) para que el staff no lo vea.
+class Purchase {
+  Purchase({
+    this.id,
+    required this.item,
+    this.qty,
+    this.area,
+    this.maintenanceId,
+    this.maintenanceTitle,
+    this.note,
+    this.status = PStatus.pedido,
+    this.requestedBy,
+    this.requestedName,
+    String? createdAt,
+    this.boughtAt,
+    this.movementId,
+  }) : createdAt = createdAt ?? ymd(today());
+  String? id;
+  String item;
+  String? qty;
+  String? area; // mismo formato que en mantenimiento
+  String? maintenanceId;
+  String? maintenanceTitle;
+  String? note;
+  PStatus status;
+  String? requestedBy;
+  String? requestedName;
+  String createdAt;
+  String? boughtAt;
+  String? movementId;
+
+  bool get isOpen => status == PStatus.pedido || status == PStatus.comprado;
+
+  Map<String, dynamic> toMap() => {
+        'item': item,
+        'qty': qty,
+        'area': area,
+        'maintenanceId': maintenanceId,
+        'maintenanceTitle': maintenanceTitle,
+        'note': note,
+        'status': status.name,
+        'requestedBy': requestedBy,
+        'requestedName': requestedName,
+        'createdAt': createdAt,
+        'boughtAt': boughtAt,
+        'movementId': movementId,
+      };
+
+  factory Purchase.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data() ?? {};
+    return Purchase(
+      id: d.id,
+      item: m['item'] ?? '',
+      qty: m['qty'],
+      area: m['area'],
+      maintenanceId: m['maintenanceId'],
+      maintenanceTitle: m['maintenanceTitle'],
+      note: m['note'],
+      status: PStatus.values.firstWhere((s) => s.name == m['status'], orElse: () => PStatus.pedido),
+      requestedBy: m['requestedBy'],
+      requestedName: m['requestedName'],
+      createdAt: m['createdAt'],
+      boughtAt: m['boughtAt'],
+      movementId: m['movementId'],
     );
   }
 }

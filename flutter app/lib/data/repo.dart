@@ -8,8 +8,10 @@ import '../models.dart';
 
 /// Acceso a Firestore. Colecciones:
 ///   reservations (+ reservationMoney con la plata), maintenance
-///   (+ maintenanceCosts), movements, users, invites, settings/general,
-///   public/availability (la lee la web), meta/setup, meta/migrations.
+///   (+ maintenanceCosts), movements, purchases, cleaning, cleaningTasks,
+///   users, invites, settings/general, public/availability (la lee la web),
+///   housekeeping/schedule (salidas y llegadas para las mucamas),
+///   meta/setup, meta/migrations.
 class Repo {
   Repo._();
   static final instance = Repo._();
@@ -20,12 +22,16 @@ class Repo {
   /// Permisos de quien usa la app; los actualiza Session. Deciden si se leen
   /// y escriben los montos y los costos.
   Perms perms = Perms.none;
+  AppUser? me;
 
   CollectionReference<Map<String, dynamic>> get _res => _db.collection('reservations');
   CollectionReference<Map<String, dynamic>> get _money => _db.collection('reservationMoney');
   CollectionReference<Map<String, dynamic>> get _maint => _db.collection('maintenance');
   CollectionReference<Map<String, dynamic>> get _costs => _db.collection('maintenanceCosts');
   CollectionReference<Map<String, dynamic>> get _mov => _db.collection('movements');
+  CollectionReference<Map<String, dynamic>> get _purchases => _db.collection('purchases');
+  CollectionReference<Map<String, dynamic>> get _cleaning => _db.collection('cleaning');
+  CollectionReference<Map<String, dynamic>> get _cleaningTasks => _db.collection('cleaningTasks');
 
   Stream<Map<String, Map<String, dynamic>>> _byId(CollectionReference<Map<String, dynamic>> c) =>
       c.snapshots().map((q) => {for (final d in q.docs) d.id: d.data()});
@@ -127,12 +133,17 @@ class Repo {
   /// Publica en public/availability qué noches está ocupada cada cabaña de
   /// hoy en adelante, sin nombres ni datos de los huéspedes. La web lo lee
   /// para pintar el calendario.
+  ///
+  /// De paso publica en housekeeping/schedule las salidas y llegadas de los
+  /// próximos días para las mucamas, también sin nombres.
   Future<void> publishAvailability() async {
     final from = ymd(today());
-    final q = await _res.where('checkOut', isGreaterThan: from).get();
-    final ranges = <int, List<List<String>>>{for (final c in defaultCabins) c.id: []};
-    final list = [for (final d in q.docs) Reservation.fromDoc(d)].where((r) => r.occupies).toList()
+    final q = await _res.where('checkOut', isGreaterThanOrEqualTo: from).get();
+    final all = [for (final d in q.docs) Reservation.fromDoc(d)].where((r) => r.occupies).toList()
       ..sort((a, b) => a.checkIn.compareTo(b.checkIn));
+    await _publishHousekeeping(all.where((r) => !r.isBlock));
+    final ranges = <int, List<List<String>>>{for (final c in defaultCabins) c.id: []};
+    final list = all.where((r) => r.checkOut.compareTo(from) > 0);
     for (final r in list) {
       final start = r.checkIn.compareTo(from) < 0 ? from : r.checkIn;
       for (final c in r.cabins) {
@@ -148,6 +159,40 @@ class Repo {
     await _db.doc('public/availability').set({
       // Rangos [llegada, salida): la noche de salida queda libre.
       'json': jsonEncode({'from': from, 'cabins': ranges.map((k, v) => MapEntry('$k', v))}),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> _publishHousekeeping(Iterable<Reservation> list) async {
+    final from = ymd(today());
+    final to = ymd(today().add(const Duration(days: 45)));
+    bool inWindow(String d) => d.compareTo(from) >= 0 && d.compareTo(to) < 0;
+    final events = <CleaningEvent>[];
+    for (final r in list) {
+      for (final c in r.cabins) {
+        final cabin = defaultCabins.where((x) => x.id == c).firstOrNull;
+        if (inWindow(r.checkOut)) events.add(CleaningEvent(date: r.checkOut, cabin: c, arrival: false));
+        if (inWindow(r.checkIn)) {
+          final joined = r.beds[c] ?? (cabin != null && !cabin.hasBedOptions ? 0 : null);
+          events.add(CleaningEvent(
+            date: r.checkIn,
+            cabin: c,
+            arrival: true,
+            // Con varias cabañas la cantidad de personas es del grupo entero.
+            people: r.cabins.length == 1 ? r.people : null,
+            beds: joined == null || cabin == null ? null : cabin.bedsLabel(joined),
+            crib: r.crib,
+            pets: r.pets,
+            note: r.cleaningNote,
+            nights: r.nights,
+            tentative: r.status == ResStatus.consulta,
+          ));
+        }
+      }
+    }
+    events.sort((a, b) => a.date != b.date ? a.date.compareTo(b.date) : a.cabin.compareTo(b.cabin));
+    await _db.doc('housekeeping/schedule').set({
+      'json': jsonEncode([for (final e in events) e.toMap()]),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -183,6 +228,30 @@ class Repo {
   }
 
   /// Guarda el arreglo; el costo sólo si tiene permiso para editarlo.
+  /// Marca hecho o vuelve a pendiente. Si se repite, al terminarla queda
+  /// anotada la próxima.
+  Future<void> toggleMaintenance(MaintenanceItem m) async {
+    final done = m.status != MStatus.hecho;
+    m.status = done ? MStatus.hecho : MStatus.pendiente;
+    // Una tarea con fecha queda en el historial con el día en que se hizo.
+    if (done && m.dueDate != null) m.date = ymd(today());
+    await saveMaintenance(m);
+    if (done && m.repeatDays != null && m.repeatDays! > 0) {
+      await saveMaintenance(MaintenanceItem(
+        area: m.area,
+        title: m.title,
+        date: ymd(today()),
+        description: m.description,
+        provider: m.provider,
+        kind: m.kind,
+        assignedTo: m.assignedTo,
+        assignedName: m.assignedName,
+        dueDate: ymd(today().add(Duration(days: m.repeatDays!))),
+        repeatDays: m.repeatDays,
+      ));
+    }
+  }
+
   Future<void> saveMaintenance(MaintenanceItem m) {
     m.createdBy ??= _uid;
     final ref = m.id == null ? _maint.doc() : _maint.doc(m.id);
@@ -196,6 +265,79 @@ class Repo {
         ..delete(_maint.doc(id))
         ..delete(_costs.doc(id)))
       .commit();
+
+  // ---------- Limpieza ----------
+
+  Stream<List<CleaningEvent>> housekeeping() => _db.doc('housekeeping/schedule').snapshots().map((d) {
+        final json = d.data()?['json'] as String?;
+        if (json == null) return <CleaningEvent>[];
+        return [for (final e in jsonDecode(json) as List) CleaningEvent.fromMap(Map<String, dynamic>.from(e))];
+      });
+
+  /// Claves (CleaningEvent.key) de lo que ya se dejó listo desde ayer en adelante.
+  Stream<Set<String>> cleaningDone() => _cleaning
+      .where('date', isGreaterThanOrEqualTo: ymd(today().subtract(const Duration(days: 1))))
+      .snapshots()
+      .map((q) => {for (final d in q.docs) if (d.data()['done'] == true) d.id});
+
+  Future<void> setCleaningDone(CleaningEvent e, bool done) =>
+      _cleaning.doc(e.key).set({'date': e.date, 'done': done, 'by': _uid, 'byName': me?.name, 'at': FieldValue.serverTimestamp()});
+
+  /// Indicaciones de los últimos 30 días y las que vienen.
+  Stream<List<CleaningTask>> cleaningTasks() => _cleaningTasks
+      .where('date', isGreaterThanOrEqualTo: ymd(today().subtract(const Duration(days: 30))))
+      .orderBy('date')
+      .snapshots()
+      .map((q) => [for (final d in q.docs) CleaningTask.fromDoc(d)]);
+
+  Future<void> saveCleaningTask(CleaningTask t) {
+    t
+      ..createdBy ??= _uid
+      ..createdName ??= me?.name;
+    return t.id == null ? _cleaningTasks.add(t.toMap()) : _cleaningTasks.doc(t.id).set(t.toMap());
+  }
+
+  Future<void> deleteCleaningTask(String id) => _cleaningTasks.doc(id).delete();
+
+  // ---------- Compras ----------
+
+  Stream<List<Purchase>> purchases() =>
+      _purchases.orderBy('createdAt', descending: true).limit(300).snapshots().map((q) => [for (final d in q.docs) Purchase.fromDoc(d)]);
+
+  Future<void> savePurchase(Purchase p) {
+    p
+      ..requestedBy ??= _uid
+      ..requestedName ??= me?.name;
+    return p.id == null ? _purchases.add(p.toMap()) : _purchases.doc(p.id).set(p.toMap());
+  }
+
+  /// Marca comprado y, si se cargó el monto, deja el gasto en la caja.
+  Future<void> markBought(Purchase p, {num? amount, String? account, String? category}) {
+    final batch = _db.batch();
+    final ref = p.id == null ? _purchases.doc() : _purchases.doc(p.id);
+    p
+      ..id = ref.id
+      ..status = PStatus.comprado
+      ..boughtAt = ymd(today());
+    if (amount != null && amount > 0 && account != null) {
+      final mov = _mov.doc();
+      p.movementId = mov.id;
+      batch.set(mov, {
+        'date': p.boughtAt,
+        'detail': 'Compra: ${p.item}${p.qty == null || p.qty!.isEmpty ? '' : ' (${p.qty})'}',
+        'amount': -amount,
+        'account': account,
+        'category': category ?? 'Otros',
+        'reservationId': null,
+        'purchaseId': ref.id,
+        'createdBy': _uid,
+      });
+    }
+    batch.set(ref, p.toMap());
+    return batch.commit();
+  }
+
+  Future<void> deletePurchase(String id) => _purchases.doc(id).delete();
 
   // ---------- Caja ----------
 

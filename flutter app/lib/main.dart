@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
+import 'data/alerts.dart';
 import 'data/session.dart';
 import 'firebase_options.dart';
 import 'router.dart';
@@ -39,12 +40,13 @@ Future<void> main() async {
     }
   }
   final session = Session();
-  runApp(MartinaManuelApp(session: session));
+  runApp(MartinaManuelApp(session: session, alerts: Alerts(session)));
 }
 
 class MartinaManuelApp extends StatefulWidget {
-  const MartinaManuelApp({super.key, required this.session});
+  const MartinaManuelApp({super.key, required this.session, required this.alerts});
   final Session session;
+  final Alerts alerts;
 
   @override
   State<MartinaManuelApp> createState() => _MartinaManuelAppState();
@@ -56,14 +58,17 @@ class _MartinaManuelAppState extends State<MartinaManuelApp> {
   @override
   Widget build(BuildContext context) => SessionScope(
         session: widget.session,
-        child: MaterialApp.router(
-          title: 'Martina Manuel · Gestión',
-          debugShowCheckedModeBanner: false,
-          theme: MM.theme(),
-          routerConfig: router,
-          locale: const Locale('es', 'AR'),
-          supportedLocales: const [Locale('es', 'AR'), Locale('es')],
-          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        child: AlertsScope(
+          alerts: widget.alerts,
+          child: MaterialApp.router(
+            title: 'Martina Manuel · Gestión',
+            debugShowCheckedModeBanner: false,
+            theme: MM.theme(),
+            routerConfig: router,
+            locale: const Locale('es', 'AR'),
+            supportedLocales: const [Locale('es', 'AR'), Locale('es')],
+            localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          ),
         ),
       );
 }
@@ -73,6 +78,13 @@ class SessionScope extends InheritedNotifier<Session> {
   const SessionScope({super.key, required Session session, required super.child}) : super(notifier: session);
 
   static Session of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<SessionScope>()!.notifier!;
+}
+
+/// Avisos de la app: `AlertsScope.of(context).items`.
+class AlertsScope extends InheritedNotifier<Alerts> {
+  const AlertsScope({super.key, required Alerts alerts, required super.child}) : super(notifier: alerts);
+
+  static Alerts of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<AlertsScope>()!.notifier!;
 }
 
 class _SetupMissing extends StatelessWidget {

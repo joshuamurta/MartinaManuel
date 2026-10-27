@@ -64,6 +64,7 @@ class ReservationDetailScreen extends StatelessWidget {
                 if (r.crib) const InfoChip('Cuna', icon: Icons.crib_outlined),
                 if (r.channel != null) InfoChip(channels[r.channel] ?? r.channel!, icon: Icons.campaign_outlined),
               ]),
+              if (!r.isBlock) ...[const SizedBox(height: 16), _Beds(r: r, settings: settings)],
               if (r.warnings.isNotEmpty) ...[const SizedBox(height: 16), _Warnings(r: r, canEdit: perms.canEdit('reservas'))],
               if (!r.isBlock) ...[
                 if (perms.money) ...[const SizedBox(height: 16), _Money(r: r, canEdit: perms.editMoney)],
@@ -123,6 +124,46 @@ class ReservationDetailScreen extends StatelessWidget {
         }
     }
   }
+}
+
+/// Armado de camas e indicaciones para la mucama.
+class _Beds extends StatelessWidget {
+  const _Beds({required this.r, required this.settings});
+  final Reservation r;
+  final Settings settings;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('CAMAS', style: MM.label()),
+            const SizedBox(height: 6),
+            for (final id in r.cabins)
+              Builder(builder: (context) {
+                final c = settings.cabin(id);
+                final joined = r.beds[id] ?? (c.hasBedOptions ? null : 0);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(children: [
+                    Icon(Icons.bed_outlined, size: 18, color: joined == null ? MM.canyon : MM.forest),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${c.name}: ${joined == null ? 'sin definir — preguntar cómo duermen' : c.bedsLabel(joined)}',
+                        style: TextStyle(fontWeight: FontWeight.w700, color: joined == null ? MM.canyon : MM.ink),
+                      ),
+                    ),
+                  ]),
+                );
+              }),
+            if ((r.cleaningNote ?? '').isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text('Para la mucama: ${r.cleaningNote}', style: const TextStyle(fontStyle: FontStyle.italic)),
+            ],
+          ]),
+        ),
+      );
 }
 
 class _Warnings extends StatelessWidget {

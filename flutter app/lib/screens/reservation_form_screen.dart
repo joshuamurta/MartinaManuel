@@ -36,6 +36,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
   final _usd = TextEditingController();
   final _invoice = TextEditingController();
   final _notes = TextEditingController();
+  final _cleaningNote = TextEditingController();
 
   @override
   void initState() {
@@ -62,6 +63,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
     _usd.text = r.balanceUsd?.toString() ?? '';
     _invoice.text = r.invoiceNo ?? '';
     _notes.text = r.notes ?? '';
+    _cleaningNote.text = r.cleaningNote ?? '';
     _checkConflicts();
   }
 
@@ -93,7 +95,9 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
       ..nightlyPrice = num.tryParse(_price.text)
       ..balanceUsd = num.tryParse(_usd.text.replaceAll(',', '.'))
       ..invoiceNo = _optText(_invoice)
-      ..notes = _optText(_notes);
+      ..notes = _optText(_notes)
+      ..cleaningNote = _optText(_cleaningNote)
+      ..beds = {for (final e in r.beds.entries) if (r.cabins.contains(e.key)) e.key: e.value};
     if (r.isBlock && r.name.isEmpty) r.name = 'Bloqueado';
 
     setState(() => _saving = true);
@@ -235,6 +239,16 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
                       FilterChip(label: const Text('Mascota'), selected: r.pets, onSelected: (v) => setState(() => r.pets = v)),
                       FilterChip(label: const Text('Cuna'), selected: r.crib, onSelected: (v) => setState(() => r.crib = v)),
                     ]),
+                    _section('Armado de camas'),
+                    if (r.cabins.isEmpty) const Text('Elegí la cabaña para ver las camas.', style: TextStyle(color: MM.inkSoft)),
+                    for (final id in r.cabins) _BedsField(cabin: settings.cabin(id), joined: r.beds[id], onChanged: (j) => setState(() => r.beds = {...r.beds, id: j})),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _cleaningNote,
+                      maxLines: 2,
+                      minLines: 1,
+                      decoration: const InputDecoration(labelText: 'Indicaciones para la mucama', hintText: 'Dejar leña, llegan tarde, toallas extra…'),
+                    ),
                   ],
                   if (!r.isBlock && money) ...[
                     _section('Importe'),
@@ -362,5 +376,34 @@ class _DatesField extends StatelessWidget {
           child: Text('${fmtDay(r.inDate)} → ${fmtDay(r.outDate)}  ·  ${r.nights} ${r.nights == 1 ? 'noche' : 'noches'}',
               style: const TextStyle(fontWeight: FontWeight.w700)),
         ),
+      );
+}
+
+/// Cómo dejar armadas las camas de una cabaña (le llega a la mucama).
+class _BedsField extends StatelessWidget {
+  const _BedsField({required this.cabin, required this.joined, required this.onChanged});
+  final Cabin cabin;
+  final int? joined;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(cabin.name, style: const TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          if (!cabin.hasBedOptions)
+            Text(cabin.bedsLabel(0))
+          else
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (var j = 0; j <= cabin.joinable; j++)
+                ChoiceChip(label: Text(cabin.bedsLabel(j)), selected: joined == j, onSelected: (_) => onChanged(j)),
+            ]),
+          if (cabin.hasBedOptions && joined == null)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text('Preguntale al huésped cómo duermen.', style: TextStyle(color: MM.canyon, fontSize: 12.5)),
+            ),
+        ]),
       );
 }

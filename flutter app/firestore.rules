@@ -15,8 +15,8 @@ service cloud.firestore {
     function admin() { return signedIn() && exists(profilePath()) && me().active == true && me().role == 'admin'; }
 
     function defaults(role) {
-      return role == 'staff' ? {'mantenimiento': 2}
-        : role in ['encargado', 'user'] ? {'reservas': 2, 'mantenimiento': 2}
+      return role == 'staff' ? {'mantenimiento': 2, 'compras': 1}
+        : role in ['encargado', 'user'] ? {'reservas': 2, 'mantenimiento': 2, 'limpieza': 2, 'compras': 2}
         : {};
     }
     function level(key) { return me().get('perms', defaults(me().role)).get(key, 0); }
@@ -60,15 +60,55 @@ service cloud.firestore {
       allow delete: if can('mantenimiento', 2) && can('eliminar', 2);
     }
 
-    // Caja. Quien puede cobrar reservas deja el ingreso de ese cobro.
+    // Salidas y llegadas sin datos de huéspedes; se rearma al guardar reservas.
+    match /housekeeping/{doc} {
+      allow read: if can('limpieza', 1);
+      allow write: if can('reservas', 2);
+    }
+
+    // Qué cabañas ya quedaron listas (id: fecha_cabaña_in|out).
+    match /cleaning/{id} {
+      allow read: if can('limpieza', 1);
+      allow write: if can('limpieza', 2);
+    }
+
+    match /cleaningTasks/{id} {
+      allow read: if can('limpieza', 1);
+      allow write: if can('limpieza', 2);
+    }
+
+    // Compras: 1 = pide, 2 = gestiona. Quien pide puede corregir o cancelar
+    // su pedido mientras no se compró; cualquiera que pide puede marcar
+    // entregado lo que ya se compró.
+    match /purchases/{id} {
+      allow read: if can('compras', 1);
+      allow create: if can('compras', 2) || (can('compras', 1)
+        && request.resource.data.status == 'pedido'
+        && request.resource.data.requestedBy == request.auth.uid
+        && request.resource.data.movementId == null);
+      allow update: if can('compras', 2) || (can('compras', 1) && (
+        (resource.data.status == 'comprado' && request.resource.data.status == 'entregado'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+        || (resource.data.requestedBy == request.auth.uid && resource.data.status == 'pedido'
+          && request.resource.data.status in ['pedido', 'cancelado']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['item', 'qty', 'area', 'note', 'status', 'maintenanceId', 'maintenanceTitle']))
+      ));
+      allow delete: if can('compras', 2) && can('eliminar', 2);
+    }
+
+    // Caja. Quien puede cobrar reservas deja el ingreso de ese cobro y quien
+    // gestiona compras, el gasto de lo que compró.
     match /movements/{id} {
       allow read: if can('caja', 1);
-      allow create, update: if can('caja', 2) || (can('montos', 2) && request.resource.data.reservationId is string && request.resource.data.category == 'Reservas');
+      allow create, update: if can('caja', 2)
+        || (can('montos', 2) && request.resource.data.reservationId is string && request.resource.data.category == 'Reservas')
+        || (can('compras', 2) && request.resource.data.purchaseId is string && request.resource.data.amount < 0);
       allow delete: if can('caja', 2) || (can('montos', 2) && resource.data.reservationId is string);
     }
 
+    // Todos los que trabajan ven quién es quién (para asignar tareas).
     match /users/{uid} {
-      allow read: if (signedIn() && request.auth.uid == uid) || admin();
+      allow read: if (signedIn() && request.auth.uid == uid) || worker();
 
       // Primer ingreso: pendiente, con el rol y permisos de su invitación, o
       // admin si nadie configuró la app todavía. Nadie se pone permisos solo.
